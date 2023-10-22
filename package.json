@@ -4,7 +4,8 @@
   "version": "0.0.1",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "http-server ./dist"
+      "dev": "http-server ./dist",
+      "build": "webpack"
   },
   "devDependencies": {
     "@types/google-one-tap": "^1.2.4",
