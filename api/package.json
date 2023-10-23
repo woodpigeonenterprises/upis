@@ -1,0 +1,13 @@
+{
+  "name": "upis-api",
+  "type": "module",
+  "version": "0.0.1",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2",
+  }
+}
