@@ -1,0 +1,73 @@
+
+** User setup
+- Get a user id token
+- Turn into Upis token
+  - Upis token includes simple tree of group memberships
+    each group has its recordings
+  - so on each new login, we need to get a new Upis token
+  - an Upis token itself has a lifetime
+    which is the minimum of all the tokens it wraps
+  - so we form a UserContext
+  - 
+  
+** UserContext
+contains an id token, and additional claims based on this provided by our putative token server
+by logging in/out the context would therefore be refreshed, or some automatic mechanism can be thought of
+
+the great cost of this though is that users **do** need to contact a live server to get a token
+but the TTL could be very long on these
+
+the lifetime of the id token is an issue, as the UserContext can't be longer-lived than the id token
+in fact, it should have exactly the same lifetime, and when trying to use it, we should refuse to use a context with only such a time still standing on it
+to protect the id token
+
+So, from the start...
+*** check for cached UserContext
+*** if we don't have one, then go into 'sign in with Google flow' stuff
+*** if we have one, proceed to main app
+*** we must handle expired tokens on all calls
+**** either we check on use ourselves
+**** or we handle error codes from AWS
+** Permissions
+the UserContext server provides limited-scope access tokens to S3 and Dynamo
+which again themselves contribute to the overall context lifetime
+
+*or* it ensures AWS itself is populated with subject-specific ACLs
+
+such ACLs would be better as it passes more responsibility to AWS itself
+but doesn't feel especially scalable
+
+time-limited access tokens could be provided per group, and stored in the context against groups
+(or maybe the UserContext could be exchanged for a GroupUserContext?)
+
+how would we kick people out of groups?
+we'd need some means of revoking provided tokens
+which maybe AWS provides?
+
+we could maybe do a clever hybrid here:
+have a temporary blocklist for such users *temporarily* via the ACL approach
+(if ACLs trump bearer tokens???)
+
+apparently the permission can be cycled away from the user associated with the presigned URL
+ 
+
+
+
+
+
+
+
+
+ 
+
+  
+
+
+
+
+
+
+
+
+
+

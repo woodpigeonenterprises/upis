@@ -89,6 +89,18 @@ window.onload = () => {
 			const googleToken = result.credential;
 			console.log('Got Google token', googleToken);
 
+			const resp = await fetch('http://localhost:9999/session', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					token: googleToken
+				})
+			})
+			console.log(resp.body);
+			
+
 			const sts = new STSClient({ region: 'eu-west-2' });
 
 			const r = await sts.send(new AssumeRoleWithWebIdentityCommand({
