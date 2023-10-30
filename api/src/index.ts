@@ -3,63 +3,67 @@ import Router from "@koa/router";
 import cors from "@koa/cors";
 import bodyparser from "koa-bodyparser";
 import jsonwebtoken from "jsonwebtoken";
-import { createPublicKey, JsonWebKey } from "crypto";
+import { createPublicKey, createPrivateKey, JsonWebKey } from "crypto";
+import { userExists, getUserAwsCreds, createBand } from "./users.js";
+import fs from "fs";
+import { err } from "./util.js";
 
 const app = new Koa();
 const router = new Router();
 
-router.get('/', x => x.body = 'Hello!');
-
+router.get('/', x => x.body = 'UPISAPI™');
 
 router.post('/session', async x => {
   console.log(x.request.body);
 
   const token = (x.request.body as any).token;
-  if(typeof token !== 'string') throw Error('Body not string');
+  if(typeof token !== 'string') {
+    x.status = 400;
+    return;
+  }
 
-  const [userId, jwt] = await verifyJwt(token);
-  console.log(userId);
+  const verified = await verifyExternalJwt(token);
+  if(!verified) {
+    x.status = 403;
+    return;
+  }
+
+  const [uid, jwt] = verified;
+  console.log(uid);
   console.log(jwt);
 
-  // as long as client has token from us with DynamoDb pre-signed URL
-  // then they can enquire themselves about bands etc
+  if(!await userExists(uid)) {
+    x.status = 404;
+    return;
+  }
 
+  const sessionExpires = (30 * 60 * 1000) + Date.now();
+  //todo this needs to match aws creds too!!!
+
+  const [userJwt, awsCreds] = await Promise.all([
+    buildJwt({
+      uid,
+      exp: sessionExpires
+    }),
+    getUserAwsCreds(uid)
+  ]);
+
+  x.status = 201;
+
+  x.cookies.set('upis_user', userJwt, { expires: new Date(sessionExpires), httpOnly: true });
   
+  x.body = {
+    uid,
+    aws: awsCreds
+  };
+});
 
-  // const bands = await getBands(userId);
-  // console.log(bands);
+router.post('/band', async x => {
+  const cookie = x.cookies.get('upis_user') || err('No cookie on request');
+  const uid = (await verifyUpisJwt(cookie)) || err('Bad JWT');
+  await createBand(uid);
 
-
-  //instead of getting bands individually
-  //we should just give access to the one DynamoDb root
-  //then it's up to the client to poll this
-  //and request further links with token
-
-  //we give band urls when we are asked for them
-  //(and should verify membership at that point, rather than creating useless signedlinks up front)
-
-
-
-
-  // now we know the canonical userId
-  // we should return a signed link to poll DynamoDb for user details (eg memberships)
-  // this root will tell the user which bands are available
-  //
-  // but the user is really after dynamodb urls
-  // to allow scanning for all band recordings
-  // or S3 list command???
-  //
-
-  // 
-  //
-  //
-  //
-
-
-
-  
-
-  x.body = '{}';
+  x.status = 201;
 });
 
 app
@@ -72,17 +76,15 @@ app
   .use(router.allowedMethods())
   .listen(9999);
 
-//
-// we receive id tokens
-// and exchange them for a user context
-// as a cookie maybe
-// 
-//
-//
-//
+async function verifyUpisJwt(token: string): Promise<false|UserId> {
+  const jwt = jsonwebtoken.verify(token, upisKey); //todo maxAge!!!!!
+  if(typeof jwt !== 'string') throw Error('JWT payload not a string');
 
+  const payload = JSON.parse(jwt);
+  return payload.uid as string
+}
 
-async function verifyJwt(token: string): Promise<[UserId, jsonwebtoken.JwtPayload]> {
+async function verifyExternalJwt(token: string): Promise<false|[UserId, jsonwebtoken.JwtPayload]> {
   const jwt = jsonwebtoken.decode(token, {json:true, complete:true});
   if(!jwt) throw Error(`No jwt decoded`);
 
@@ -126,6 +128,15 @@ function isJwk(v: any): v is JsonWebKey {
     && typeof v.kty === 'string'
     && typeof v.alg === 'string'
     && typeof v.n === 'string';
+}
+
+
+const pem = fs.readFileSync('./upis.pem');
+const upisKey = createPrivateKey(pem);
+
+async function buildJwt(payload: unknown): Promise<string> {
+  const jwt = jsonwebtoken.sign(JSON.stringify(payload), upisKey, { algorithm: 'RS512' });
+  return jwt;
 }
 
 type JwkPayload = {
