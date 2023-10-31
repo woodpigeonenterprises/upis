@@ -1,6 +1,7 @@
-import { DynamoDBClient, GetItemCommand, PutItemCommand, TransactWriteItemsCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from "@aws-sdk/client-dynamodb";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { err } from "./util.js";
+import { randomUUID } from "crypto";
 
 const creds = {
   accessKeyId: process.env.AWS_ACCESS_KEY_ID || err('Missing AWS_ACCESS_KEY_ID'),
@@ -17,35 +18,34 @@ const dynamo = new DynamoDBClient({
   credentials: creds
 });
 
-export async function createBand(uid: string) {
-  const bid = crypto.randomUUID();
-
-  // const r = await dynamo.send(new GetItemCommand({
-  //   TableName: 'upis',
-  //   Key: { key: { S: `user/${uid}` } },
-  //   AttributesToGet: ['bands']
-  // }));
-
-  // if(!r.Item) err(`Couldn't find user ${uid}`);
-
-  // const bands0 = r.Item.bands.SS as string[];
-
-  // bands0.push(bid);
+export async function createBand(uid: string, name: string) {
+  const bid = randomUUID();
 
   const r = await dynamo.send(new TransactWriteItemsCommand({
     TransactItems: [
-      new PutItemCommand({
-        TableName: 'upis',
-        Item: {
-          key: { S: `band/${bid}` }
+      {
+        Put: {
+          TableName: 'upis',
+          Item: {
+            key: { S: `band/${bid}` },
+            users: { SS: [uid] },
+            name: { S: name }
+          }
         }
-      }),
-      new UpdateItemCommand({
-        Key: { key: { S: `user/${uid}` }},
-        AttributeUpdates: {
-          bands: { Action: 'ADD', Value: { S: bid } }
+      },
+      {
+        Update: {
+          TableName: 'upis',
+          Key: { key: { S: `user/${uid}` }},
+          UpdateExpression: 'SET bands.#bid = :bandName',
+          ExpressionAttributeNames: {
+            '#bid': bid
+          },
+          ExpressionAttributeValues: {
+            ':bandName': { S: name }
+          }
         }
-      })
+      }
     ]
   }));
 

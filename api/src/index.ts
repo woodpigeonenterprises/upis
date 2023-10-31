@@ -42,7 +42,7 @@ router.post('/session', async x => {
 
   const [userJwt, awsCreds] = await Promise.all([
     buildJwt({
-      uid,
+      sub: uid,
       exp: sessionExpires
     }),
     getUserAwsCreds(uid)
@@ -50,18 +50,31 @@ router.post('/session', async x => {
 
   x.status = 201;
 
-  x.cookies.set('upis_user', userJwt, { expires: new Date(sessionExpires), httpOnly: true });
+  x.cookies.set(
+    'upis_user',
+    userJwt,
+    {
+      expires: new Date(sessionExpires),
+      httpOnly: true,
+      sameSite: 'strict'
+      //should also be 'secure' if we are serving from https
+    });
   
   x.body = {
     uid,
-    aws: awsCreds
+    aws: awsCreds,
+    expires: sessionExpires
   };
 });
 
 router.post('/band', async x => {
   const cookie = x.cookies.get('upis_user') || err('No cookie on request');
   const uid = (await verifyUpisJwt(cookie)) || err('Bad JWT');
-  await createBand(uid);
+
+  const name = (<any>x.request.body).name;
+  if(typeof name !== 'string') err('Bad name prop');
+  
+  await createBand(uid, name);
 
   x.status = 201;
 });
@@ -69,7 +82,8 @@ router.post('/band', async x => {
 app
   .use(cors({
     origin: 'http://localhost:8080',
-    allowMethods: ['GET','PUT','POST']
+    allowMethods: ['GET','PUT','POST'],
+    credentials: true
   }))
   .use(bodyparser())
   .use(router.routes())
@@ -77,11 +91,9 @@ app
   .listen(9999);
 
 async function verifyUpisJwt(token: string): Promise<false|UserId> {
-  const jwt = jsonwebtoken.verify(token, upisKey); //todo maxAge!!!!!
-  if(typeof jwt !== 'string') throw Error('JWT payload not a string');
-
-  const payload = JSON.parse(jwt);
-  return payload.uid as string
+  const jwt = jsonwebtoken.verify(token, upisPublicKey); //todo maxAge!!!!!
+  if(typeof jwt === 'string') throw Error('JWT payload not deserialised');
+  return jwt.sub!;
 }
 
 async function verifyExternalJwt(token: string): Promise<false|[UserId, jsonwebtoken.JwtPayload]> {
@@ -132,10 +144,11 @@ function isJwk(v: any): v is JsonWebKey {
 
 
 const pem = fs.readFileSync('./upis.pem');
-const upisKey = createPrivateKey(pem);
+const upisPrivateKey = createPrivateKey(pem);
+const upisPublicKey = createPublicKey(upisPrivateKey);
 
 async function buildJwt(payload: unknown): Promise<string> {
-  const jwt = jsonwebtoken.sign(JSON.stringify(payload), upisKey, { algorithm: 'RS512' });
+  const jwt = jsonwebtoken.sign(JSON.stringify(payload), upisPrivateKey, { algorithm: 'RS512' });
   return jwt;
 }
 

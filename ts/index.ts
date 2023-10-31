@@ -11,6 +11,7 @@ let user: User;
 const serverUrl = 'http://localhost:9999';
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
 
+
 window.onload = () => {
 	google.accounts.id.initialize({
 		log_level: 'debug',
@@ -19,28 +20,16 @@ window.onload = () => {
 			const googleToken = result.credential;
 			console.log('Got Google token', googleToken);
 
-			const resp = await fetch(`${serverUrl}/session`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					token: googleToken
-				})
-			})
-
-			const body = await resp.json();
-			const uid = body.uid as string;
-			const awsCreds = body.aws as AwsCreds;
+			const session = await loadSession('google', googleToken);
 
 			const dynamo = new DynamoDBClient({
 				region: 'eu-west-1',
-				credentials: awsCreds
+				credentials: session.awsCreds
 			});
 
-			const loaded = await loadUser(dynamo, uid);
+			const loaded = await loadUser(dynamo, session.uid);
 			if(!loaded) {
-				document.write(`User ${uid} not set up`);
+				document.write(`User ${session.uid} not set up`);
 				return;
 			}
 
@@ -56,9 +45,42 @@ window.onload = () => {
 	google.accounts.id.prompt();
 };
 
+type Session = {
+	uid: string,
+	awsCreds: AwsCreds,
+	expires: number
+};
+
 type User = {
 	name: string,
-	bands: string[]
+	bands: Map<string, string>
+}
+
+async function loadSession(tokenType: 'google', token: string): Promise<Session> {
+	const resp = await fetch(`${serverUrl}/session`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({
+			tokenType,
+			token
+		}),
+		credentials: 'include',
+		mode: 'cors'
+	});
+
+	const body = await resp.json();
+
+	const session = { 
+		uid: body.uid as string,
+		awsCreds: body.aws as AwsCreds,
+		expires: body.expires as number
+	};
+
+	window.localStorage.setItem('upis_session', JSON.stringify(session));
+
+	return session;
 }
 
 async function loadUser(dynamo: DynamoDBClient, uid: string): Promise<User|false> {
@@ -76,12 +98,9 @@ async function loadUser(dynamo: DynamoDBClient, uid: string): Promise<User|false
 
 	return {
 		name: r.Item.name.S as string,
-		bands: r.Item.bands.SS as string[]
+		bands: new Map(Object.entries(r.Item.bands.M!).map(([k, v]) => [k, v.S!]))
 	};
 }
-
-
-
 
 document.getElementById('recordButton')?.addEventListener('click', async () => {
 
@@ -121,7 +140,6 @@ document.getElementById('recordButton')?.addEventListener('click', async () => {
 })
 
 
-
 function renderAll() {
   document.getElementById('recordings')!.innerHTML = `<ul>${recordings.map(renderRecording).map(h => `<li>${h}</li>`)}</ul>`
 
@@ -130,11 +148,11 @@ function renderAll() {
 
 	const ul = document.createElement('ul');
 
-	user.bands.forEach(bandName => {
+	for(let [bid, bn] of user.bands.entries()) {
 		const li = document.createElement('li');
-		li.textContent = bandName;
+		li.innerHTML = `<a href="${bid}">${bn}</a>`;
 		ul.appendChild(li);
-	});
+	};
 
 	bandsDiv.appendChild(ul);
 
@@ -154,7 +172,9 @@ function renderAll() {
 			},
 			body: JSON.stringify({
 				name: bandNameInput.value
-			})
+			}),
+			credentials: 'include',
+			mode: 'cors'
 		})
 	};
 
