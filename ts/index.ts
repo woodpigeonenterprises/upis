@@ -20,8 +20,11 @@ window.onload = async () => {
 };
 		
 async function refresh(): Promise<void> {
-	document.getElementById('topBar')!.innerHTML = '';
-	document.getElementById('main')!.innerHTML = '';
+	const divTop = document.getElementById('topBar')!;
+	const divMain = document.getElementById('main')!;
+
+	divTop.innerHTML = '';
+	divMain.innerHTML = '';
 	
 	switch(page) {
 		case 'login':
@@ -52,21 +55,8 @@ async function refresh(): Promise<void> {
 			return await refresh();
 
 		case 'user':
-			const nameSpan = document.createElement('span');
-			nameSpan.innerText = session.uid;
-
-			const logoutButton = document.createElement('input');
-			logoutButton.type = 'button';
-			logoutButton.value = 'Log out';
-			logoutButton.onclick = () => {
-				clearSession();
-				window.location.reload();
-			};
-
-			document.getElementById('topBar')!
-				.appendChild(nameSpan)
-				.appendChild(logoutButton);
-
+			renderTopBar();
+			
 			const bandsDiv = document.createElement('div');
 			bandsDiv.childNodes.forEach(n => n.remove());
 
@@ -118,11 +108,15 @@ async function refresh(): Promise<void> {
 			bandsDiv.appendChild(bandNameInput);
 			bandsDiv.appendChild(createBand);
 
-			document.getElementById('main')?.appendChild(bandsDiv);
+			divMain.appendChild(bandsDiv);
 			break;
 
 		case 'band':
+			renderTopBar();
 
+			const header = document.createElement('h1');
+			header.innerText = band.name;
+			
 			const recordingsUl = document.createElement('ul');
 
 			for(let r of recordings) {
@@ -182,11 +176,27 @@ async function refresh(): Promise<void> {
 				recorder.stop();
 			};
 
-			document.getElementById('main')!
-				.appendChild(recordingsUl)
-				.appendChild(button);
+			divMain.appendChild(header);
+			divMain.appendChild(recordingsUl);
+			divMain.appendChild(button);
 
 			break;
+	}
+
+	function renderTopBar() {
+		const nameSpan = document.createElement('span');
+		nameSpan.innerText = session.uid;
+
+		const logoutButton = document.createElement('input');
+		logoutButton.type = 'button';
+		logoutButton.value = 'Log out';
+		logoutButton.onclick = () => {
+			clearSession();
+			window.location.reload();
+		};
+
+		divTop.appendChild(nameSpan);
+		divTop.appendChild(logoutButton);
 	}
 }
 
