@@ -16,10 +16,13 @@ const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.g
 
 window.onload = async () => {
 	page = 'login';
-	await redisplay();
+	await refresh();
 };
 		
-async function redisplay(): Promise<void> {
+async function refresh(): Promise<void> {
+	document.getElementById('topBar')!.innerHTML = '';
+	document.getElementById('main')!.innerHTML = '';
+	
 	switch(page) {
 		case 'login':
 			const summoned = trySummonSession();
@@ -33,6 +36,22 @@ async function redisplay(): Promise<void> {
 				saveSession(session);
 			}
 
+			const dynamo = new DynamoDBClient({
+				region: 'eu-west-1',
+				credentials: session.awsCreds
+			});
+
+			const loaded = await loadUser(dynamo, session.uid);
+			if(!loaded) {
+				document.write(`User ${session.uid} not set up`);
+				return;
+			}
+
+			user = loaded;
+			page = 'user';
+			return await refresh();
+
+		case 'user':
 			const nameSpan = document.createElement('span');
 			nameSpan.innerText = session.uid;
 
@@ -48,23 +67,7 @@ async function redisplay(): Promise<void> {
 				.appendChild(nameSpan)
 				.appendChild(logoutButton);
 
-			const dynamo = new DynamoDBClient({
-				region: 'eu-west-1',
-				credentials: session.awsCreds
-			});
-
-			const loaded = await loadUser(dynamo, session.uid);
-			if(!loaded) {
-				document.write(`User ${session.uid} not set up`);
-				return;
-			}
-
-			user = loaded;
-			page = 'user';
-			return await redisplay();
-
-		case 'user':
-			const bandsDiv = document.getElementById('bands')!;
+			const bandsDiv = document.createElement('div');
 			bandsDiv.childNodes.forEach(n => n.remove());
 
 			const ul = document.createElement('ul');
@@ -80,7 +83,7 @@ async function redisplay(): Promise<void> {
 						name: bn
 					}
 					page = 'band';
-					await redisplay();
+					await refresh();
 				};
 				a.innerText = bn;
 				li.appendChild(a);
@@ -114,10 +117,75 @@ async function redisplay(): Promise<void> {
 
 			bandsDiv.appendChild(bandNameInput);
 			bandsDiv.appendChild(createBand);
+
+			document.getElementById('main')?.appendChild(bandsDiv);
 			break;
 
 		case 'band':
-			document.getElementById('recordings')!.innerHTML = `<ul>${recordings.map(renderRecording).map(h => `<li>${h}</li>`)}</ul>`
+
+			const recordingsUl = document.createElement('ul');
+
+			for(let r of recordings) {
+				const li = document.createElement('li');
+				li.innerHTML = r.id;
+
+				const b = document.createElement('input');
+				b.type = 'button';
+				b.value = 'Play';
+				b.onclick = async () => {
+					await r.play(audio ??= new AudioContext());
+				};
+
+				li.appendChild(b);
+				
+				recordingsUl.appendChild(li);
+			}
+
+			const button = document.createElement('input');
+			button.type = 'button';
+			button.value = 'Record';
+
+			button.onclick = async () => {
+
+				const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+				const mimeType = 'audio/ogg;codecs=opus'
+
+				const recorder = new MediaRecorder(stream, { mimeType });
+
+				const recording = new Recording(crypto.randomUUID(), mimeType);
+
+				recorder.ondataavailable = e => {
+					recording.pushBlob(e.data);
+					console.log('Data recorded');
+				};
+
+				recorder.onstart = () => {
+					console.log('Recording', recording.id, 'started')
+				};
+
+				recorder.onstop = async e => {
+					console.log('Recording', recording.id, 'complete of', recording.parts.length, 'blob parts');
+
+					const playable = recording.complete();
+					recordings.push(playable);
+					await refresh();
+
+					// but really Recordings themselves are just like Playables
+					// but in a different state
+				};
+
+				recorder.start(300);
+
+				await delay(2000);
+
+				recorder.stop();
+			};
+
+			document.getElementById('main')!
+				.appendChild(recordingsUl)
+				.appendChild(button);
+
 			break;
 	}
 }
@@ -172,6 +240,11 @@ async function createSession(tokenType: 'google', token: string): Promise<Sessio
 
 function getGoogleToken(): Promise<string> {
 	return new Promise<string>(resolve => {
+
+		const el = document.createElement('div');
+		el.id = 'googleButton';
+		document.getElementById('main')?.appendChild(el);
+		
 		google.accounts.id.initialize({
 			log_level: 'debug',
 			client_id: googleAuthClientId,
@@ -182,8 +255,7 @@ function getGoogleToken(): Promise<string> {
 			}
 		});
 
-		const parent = document.getElementById('googleButton');
-		google.accounts.id.renderButton(parent!, {theme: "filled_blue"});
+		google.accounts.id.renderButton(el, {theme: "filled_blue"});
 
 		google.accounts.id.prompt();
 	});
@@ -209,56 +281,6 @@ async function loadUser(dynamo: DynamoDBClient, uid: string): Promise<User|false
 	};
 }
 
-document.getElementById('recordButton')?.addEventListener('click', async () => {
-
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-	const mimeType = 'audio/ogg;codecs=opus'
-
-  const recorder = new MediaRecorder(stream, { mimeType });
-
-  const recording = new Recording(crypto.randomUUID(), mimeType);
-
-  recorder.ondataavailable = e => {
-    recording.pushBlob(e.data);
-    console.log('Data recorded');
-  };
-
-  recorder.onstart = () => {
-    console.log('Recording', recording.id, 'started')
-  };
-
-  recorder.onstop = async e => {
-    console.log('Recording', recording.id, 'complete of', recording.parts.length, 'blob parts');
-
-    const playable = recording.complete();
-		recordings.push(playable);
-		await redisplay();
-
-		// but really Recordings themselves are just like Playables
-		// but in a different state
-  };
-
-  recorder.start(300);
-
-  await delay(2000);
-
-  recorder.stop();
-})
-
-
-
-function renderRecording(r: Playable) {
-  return `RECORDING ${r.id} <input type="button" value="Play" onclick="playRecording('${r.id}')" />`;
-}
-
-window.playRecording = (id: string) => {
-	const found = recordings.find(r => r.id == id);
-
-	if(found) {
-		found.play(audio ??= new AudioContext());
-	}
-};
 
 function delay(ms: number) {
 	return new Promise(resolve => {
