@@ -5,67 +5,121 @@ import { AwsCreds } from "../api/src/users.js";
 
 let audio: AudioContext|undefined;
 
+let page: 'login'|'user'|'band' = 'login';
 let session: Session;
 let user: User;
+let band: Band;
 let recordings: Playable[] = [];
 
 const serverUrl = 'http://localhost:9999';
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
 
 window.onload = async () => {
-	const summoned = trySummonSession();
-
-	if(summoned) {
-		session = summoned;
-	}
-	else {
-		const googleToken = await getGoogleToken();
-		session = await createSession('google', googleToken);
-		saveSession(session);
-	}
-
-	const nameSpan = document.createElement('span');
-	nameSpan.innerText = session.uid;
-
-	const logoutButton = document.createElement('input');
-	logoutButton.type = 'button';
-	logoutButton.value = 'Log out';
-	logoutButton.onclick = () => {
-		clearSession();
-		window.location.reload();
-	};
-
-	document.getElementById('topBar')!
-		.appendChild(nameSpan)
-		.appendChild(logoutButton);
-
-	const dynamo = new DynamoDBClient({
-		region: 'eu-west-1',
-		credentials: session.awsCreds
-	});
-
-	const loaded = await loadUser(dynamo, session.uid);
-	if(!loaded) {
-		document.write(`User ${session.uid} not set up`);
-		return;
-	}
-
-	user = loaded;
-
-	renderAll();
+	page = 'login';
+	await redisplay();
 };
 		
+async function redisplay(): Promise<void> {
+	switch(page) {
+		case 'login':
+			const summoned = trySummonSession();
 
+			if(summoned) {
+				session = summoned;
+			}
+			else {
+				const googleToken = await getGoogleToken();
+				session = await createSession('google', googleToken);
+				saveSession(session);
+			}
 
-type Session = {
-	uid: string,
-	awsCreds: AwsCreds,
-	expires: number
-};
+			const nameSpan = document.createElement('span');
+			nameSpan.innerText = session.uid;
 
-type User = {
-	name: string,
-	bands: Map<string, string>
+			const logoutButton = document.createElement('input');
+			logoutButton.type = 'button';
+			logoutButton.value = 'Log out';
+			logoutButton.onclick = () => {
+				clearSession();
+				window.location.reload();
+			};
+
+			document.getElementById('topBar')!
+				.appendChild(nameSpan)
+				.appendChild(logoutButton);
+
+			const dynamo = new DynamoDBClient({
+				region: 'eu-west-1',
+				credentials: session.awsCreds
+			});
+
+			const loaded = await loadUser(dynamo, session.uid);
+			if(!loaded) {
+				document.write(`User ${session.uid} not set up`);
+				return;
+			}
+
+			user = loaded;
+			page = 'user';
+			return await redisplay();
+
+		case 'user':
+			const bandsDiv = document.getElementById('bands')!;
+			bandsDiv.childNodes.forEach(n => n.remove());
+
+			const ul = document.createElement('ul');
+
+			for(let [bid, bn] of user.bands.entries()) {
+				const li = document.createElement('li');
+
+				const a = document.createElement('a');
+				a.href = '#';
+				a.onclick = async () => {
+					band = {
+						bid,
+						name: bn
+					}
+					page = 'band';
+					await redisplay();
+				};
+				a.innerText = bn;
+				li.appendChild(a);
+
+				ul.appendChild(li);
+			};
+
+			bandsDiv.appendChild(ul);
+
+			const bandNameInput = document.createElement('input');
+			bandNameInput.type = 'text';
+			bandNameInput.placeholder = 'Band name...';
+
+			const createBand = document.createElement('input');
+			createBand.type = 'button';
+			createBand.value = 'Create Band!';
+
+			createBand.onclick = async () => {
+				const r = await fetch(`${serverUrl}/band`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						name: bandNameInput.value
+					}),
+					credentials: 'include',
+					mode: 'cors'
+				})
+			};
+
+			bandsDiv.appendChild(bandNameInput);
+			bandsDiv.appendChild(createBand);
+			break;
+
+		case 'band':
+			document.getElementById('recordings')!.innerHTML = `<ul>${recordings.map(renderRecording).map(h => `<li>${h}</li>`)}</ul>`
+			break;
+	}
 }
 
 
@@ -179,7 +233,7 @@ document.getElementById('recordButton')?.addEventListener('click', async () => {
 
     const playable = recording.complete();
 		recordings.push(playable);
-		renderAll();
+		await redisplay();
 
 		// but really Recordings themselves are just like Playables
 		// but in a different state
@@ -193,47 +247,6 @@ document.getElementById('recordButton')?.addEventListener('click', async () => {
 })
 
 
-function renderAll() {
-  document.getElementById('recordings')!.innerHTML = `<ul>${recordings.map(renderRecording).map(h => `<li>${h}</li>`)}</ul>`
-
-	const bandsDiv = document.getElementById('bands')!;
-	bandsDiv.childNodes.forEach(n => n.remove());
-
-	const ul = document.createElement('ul');
-
-	for(let [bid, bn] of user.bands.entries()) {
-		const li = document.createElement('li');
-		li.innerHTML = `<a href="${bid}">${bn}</a>`;
-		ul.appendChild(li);
-	};
-
-	bandsDiv.appendChild(ul);
-
-	const bandNameInput = document.createElement('input');
-	bandNameInput.type = 'text';
-	bandNameInput.placeholder = 'Band name...';
-	
-	const createBand = document.createElement('input');
-	createBand.type = 'button';
-	createBand.value = 'Create Band!';
-
-	createBand.onclick = async () => {
-		const r = await fetch(`${serverUrl}/band`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				name: bandNameInput.value
-			}),
-			credentials: 'include',
-			mode: 'cors'
-		})
-	};
-
-	bandsDiv.appendChild(bandNameInput);
-	bandsDiv.appendChild(createBand);
-}
 
 function renderRecording(r: Playable) {
   return `RECORDING ${r.id} <input type="button" value="Play" onclick="playRecording('${r.id}')" />`;
@@ -248,9 +261,9 @@ window.playRecording = (id: string) => {
 };
 
 function delay(ms: number) {
-    return new Promise(resolve => {
-        setTimeout(resolve, ms);
-    });
+	return new Promise(resolve => {
+		setTimeout(resolve, ms);
+	});
 }
 
 export {}
@@ -269,7 +282,6 @@ class Recording {
   readonly id: string
   readonly mimeType: string
   readonly parts: Blob[] = []
-
   constructor(id: string, mimeType: string) {
     this.id = id;
     this.mimeType = mimeType;
@@ -302,5 +314,22 @@ class Playable {
     source.connect(x.destination);
     source.start();
 	}
+}
+
+
+type Session = {
+	uid: string,
+	awsCreds: AwsCreds,
+	expires: number
+};
+
+type User = {
+	name: string,
+	bands: Map<string, string>
+}
+
+type Band = {
+	bid: string,
+	name: string
 }
 
