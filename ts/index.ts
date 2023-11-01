@@ -5,45 +5,57 @@ import { AwsCreds } from "../api/src/users.js";
 
 let audio: AudioContext|undefined;
 
-let recordings: Playable[] = [];
+let session: Session;
 let user: User;
+let recordings: Playable[] = [];
 
 const serverUrl = 'http://localhost:9999';
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
 
+window.onload = async () => {
+	const summoned = trySummonSession();
 
-window.onload = () => {
-	google.accounts.id.initialize({
-		log_level: 'debug',
-		client_id: googleAuthClientId,
-		callback: async result => {
-			const googleToken = result.credential;
-			console.log('Got Google token', googleToken);
+	if(summoned) {
+		session = summoned;
+	}
+	else {
+		const googleToken = await getGoogleToken();
+		session = await createSession('google', googleToken);
+		saveSession(session);
+	}
 
-			const session = await loadSession('google', googleToken);
+	const nameSpan = document.createElement('span');
+	nameSpan.innerText = session.uid;
 
-			const dynamo = new DynamoDBClient({
-				region: 'eu-west-1',
-				credentials: session.awsCreds
-			});
+	const logoutButton = document.createElement('input');
+	logoutButton.type = 'button';
+	logoutButton.value = 'Log out';
+	logoutButton.onclick = () => {
+		clearSession();
+		window.location.reload();
+	};
 
-			const loaded = await loadUser(dynamo, session.uid);
-			if(!loaded) {
-				document.write(`User ${session.uid} not set up`);
-				return;
-			}
+	document.getElementById('topBar')!
+		.appendChild(nameSpan)
+		.appendChild(logoutButton);
 
-			user = loaded;
-
-			renderAll();
-		}
+	const dynamo = new DynamoDBClient({
+		region: 'eu-west-1',
+		credentials: session.awsCreds
 	});
-		
-	const parent = document.getElementById('googleButton');
-	google.accounts.id.renderButton(parent!, {theme: "filled_blue"});
 
-	google.accounts.id.prompt();
+	const loaded = await loadUser(dynamo, session.uid);
+	if(!loaded) {
+		document.write(`User ${session.uid} not set up`);
+		return;
+	}
+
+	user = loaded;
+
+	renderAll();
 };
+		
+
 
 type Session = {
 	uid: string,
@@ -56,7 +68,32 @@ type User = {
 	bands: Map<string, string>
 }
 
-async function loadSession(tokenType: 'google', token: string): Promise<Session> {
+
+
+
+function clearSession() {
+	window.localStorage.removeItem('upis_session');
+}
+
+
+function trySummonSession(): Session|false {
+	const found = window.localStorage.getItem('upis_session');
+	if(found) {
+		const s = JSON.parse(found) as Session;
+
+		if(s.expires > Date.now() + 60 * 1000) {
+			return s;
+		}
+	}
+
+	return false;
+}
+
+function saveSession(session: Session): void {
+	window.localStorage.setItem('upis_session', JSON.stringify(session));
+}
+
+async function createSession(tokenType: 'google', token: string): Promise<Session> {
 	const resp = await fetch(`${serverUrl}/session`, {
 		method: 'POST',
 		headers: {
@@ -72,16 +109,32 @@ async function loadSession(tokenType: 'google', token: string): Promise<Session>
 
 	const body = await resp.json();
 
-	const session = { 
+	return { 
 		uid: body.uid as string,
 		awsCreds: body.aws as AwsCreds,
 		expires: body.expires as number
 	};
-
-	window.localStorage.setItem('upis_session', JSON.stringify(session));
-
-	return session;
 }
+
+function getGoogleToken(): Promise<string> {
+	return new Promise<string>(resolve => {
+		google.accounts.id.initialize({
+			log_level: 'debug',
+			client_id: googleAuthClientId,
+			callback: async result => {
+				const googleToken = result.credential;
+				console.log('Got Google token', googleToken);
+				resolve(googleToken);
+			}
+		});
+
+		const parent = document.getElementById('googleButton');
+		google.accounts.id.renderButton(parent!, {theme: "filled_blue"});
+
+		google.accounts.id.prompt();
+	});
+}
+
 
 async function loadUser(dynamo: DynamoDBClient, uid: string): Promise<User|false> {
 	const r = await dynamo.send(new GetItemCommand({
