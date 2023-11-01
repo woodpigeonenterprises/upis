@@ -59,7 +59,7 @@ router.post('/session', async x => {
       sameSite: 'strict'
       //should also be 'secure' if we are serving from https
     });
-  
+
   x.body = {
     uid,
     aws: awsCreds,
@@ -73,7 +73,7 @@ router.post('/band', async x => {
 
   const name = (<any>x.request.body).name;
   if(typeof name !== 'string') err('Bad name prop');
-  
+
   await createBand(uid, name);
 
   x.status = 201;
@@ -81,7 +81,7 @@ router.post('/band', async x => {
 
 app
   .use(cors({
-    origin: 'http://localhost:8080',
+    origin: 'http://localhost:8081',
     allowMethods: ['GET','PUT','POST'],
     credentials: true
   }))
