@@ -1,8 +1,12 @@
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { AwsCreds } from "../api/src/users.js";
-import { isPlayable, Track } from "./record.ts";
+import { isPlayable, Track } from "./record";
+import { openStore } from "./store"
+import { Band, Session, User } from "./model";
 
 let audio: AudioContext|undefined;
+
+const store = await openStore();
 
 let page: 'login'|'user'|'band' = 'login';
 let session: Session;
@@ -149,7 +153,7 @@ async function refresh(): Promise<void> {
 			button.value = 'Record';
 
 			button.onclick = async () => {
-				const track = await Track.record();
+				const track = await Track.record(store);
 				track.onchange = () => refresh();
 				tracks.push(track);
 
@@ -281,25 +285,3 @@ async function loadUser(dynamo: DynamoDBClient, uid: string): Promise<User|false
 }
 
 
-type Session = {
-	uid: string,
-	awsCreds: AwsCreds,
-	expires: number
-};
-
-type User = {
-	name: string,
-	bands: Map<string, string>
-}
-
-type Band = {
-	bid: string,
-	name: string
-}
-
-
-declare global {
-  interface Crypto {
-    randomUUID: () => `${string}-${string}-${string}-${string}-${string}`
-  }
-}

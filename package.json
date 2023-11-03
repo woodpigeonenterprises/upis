@@ -20,6 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.438.0",
     "@aws-sdk/client-s3": "^3.431.0",
-    "@aws-sdk/client-sts": "^3.431.0"
+    "@aws-sdk/client-sts": "^3.431.0",
+    "idb": "^7.1.1"
   }
 }

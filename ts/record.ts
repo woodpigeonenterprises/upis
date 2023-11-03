@@ -1,3 +1,4 @@
+import { Store } from "./store"
 
 export function isPlayable(v: unknown): v is Playable {
   const p = (<any>v).play;
@@ -8,14 +9,14 @@ type State = Recording|Playable|Playing;
 type Sink = (state: State) => void;
 
 export class Recording {
-  readonly track: TrackInfo
-  readonly sink: Sink
+  readonly track: TrackContext
   readonly parts: Blob[] = []
   readonly recorder: MediaRecorder
+
+  private _nextBlobId = 0
   
-  constructor(track: TrackInfo, sink: Sink, recorder: MediaRecorder) {
+  constructor(track: TrackContext, recorder: MediaRecorder) {
     this.track = track;
-    this.sink = sink;
     this.recorder = recorder;
   }
 
@@ -44,9 +45,13 @@ export class Recording {
     this.recorder.stop();
   }
 
-  private pushBlob(blob: Blob) {
-    //assuming blob is always the expected type here
+  private async pushBlob(blob: Blob) {
+    const blobId = { stream: this.track.id, idx: this._nextBlobId++ };
+    
     this.parts.push(blob);
+
+    await this.track.store.saveBlob(blobId, blob);
+    //store must guarantee order above todo
   }
 
   private complete() {
@@ -54,18 +59,16 @@ export class Recording {
 
     console.log('Created blob of type', blob.type, 'of size', blob.size);
 
-    this.sink(new Playable(this.track, this.sink, blob));
+    this.track.sink(new Playable(this.track, blob));
   }
 };
 
 export class Playable {
-  readonly track: TrackInfo
-  readonly sink: Sink
+  readonly track: TrackContext
 	readonly blob: Blob
 	
-  constructor(track: TrackInfo, sink: Sink, blob: Blob) {
+  constructor(track: TrackContext, blob: Blob) {
     this.track = track;
-    this.sink = sink;
 		this.blob = blob;
   }
 
@@ -76,7 +79,7 @@ export class Playable {
     source.connect(x.destination);
     source.start();
 
-    this.sink(new Playing(this, source));
+    this.track.sink(new Playing(this, source));
 	}
 }
 
@@ -93,12 +96,12 @@ export class Playing {
     this.source.stop();
     this.source.disconnect();
 
-    this.inner.sink(this.inner);
+    this.inner.track.sink(this.inner);
   }
 }
 
 export class Track {
-  info: TrackInfo
+  readonly info: TrackInfo
   state: State
 
   private constructor(info: TrackInfo, state: Recording|Playable|Playable) {
@@ -113,7 +116,7 @@ export class Track {
     if(this.onchange) this.onchange(this);
   }
 
-  static async record(): Promise<Track> {
+  static async record(store: Store): Promise<Track> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const mimeType = 'audio/ogg;codecs=opus'
@@ -127,9 +130,15 @@ export class Track {
 
     let track: Track;
 
-    const recording = new Recording(info, s => track.sink(s), recorder);
+    const context: TrackContext = {
+      ...info,
+      sink: s => track.sink(s),
+      store
+    };
 
-    track = new Track(info, recording);
+    const recording = new Recording(context, recorder);
+
+    track = new Track(context, recording);
 
     recording.start();
 
@@ -137,7 +146,13 @@ export class Track {
   }
 }
 
-type TrackInfo = {
+interface TrackInfo {
   id: string
   mimeType: string
 }
+
+interface TrackContext extends TrackInfo {
+  sink: Sink
+  store: Store
+}
+
