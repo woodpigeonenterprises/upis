@@ -14,15 +14,21 @@ let user: User;
 let band: Band;
 let tracks: Track[] = [];
 
+// 
+//
+//
+//
+
 const serverUrl = 'http://localhost:9999';
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
 
 window.onload = async () => {
-	page = 'resume';
-	await refresh();
+	await render('resume');
 };
 		
-async function refresh(): Promise<void> {
+async function render(nextPage?: typeof page): Promise<void> {
+	if(nextPage) { page = nextPage }
+	
 	const divTop = document.getElementById('topBar')!;
 	const divMain = document.getElementById('main')!;
 
@@ -30,11 +36,19 @@ async function refresh(): Promise<void> {
 	divMain.innerHTML = '';
 	
 	switch(page) {
+		case 'login':
+			const googleToken = await getGoogleToken();
+
+			session = await createSession('google', googleToken);
+			saveSession(session);
+
+			return await render('resume');
+
+
 		case 'resume':
 			const summoned = trySummonSession();
 			if(!summoned) {
-				page = 'login';
-				return await refresh();
+				return await render('login');
 			}
 
 			session = summoned;
@@ -46,23 +60,11 @@ async function refresh(): Promise<void> {
 
 			const loaded = await loadUser(dynamo, session.uid);
 			if(!loaded) {
-				page = 'login';
-				return await refresh();
+				return await render('login');
 			}
 
 			user = loaded;
-			page = 'user';
-			return await refresh();
-
-			
-		case 'login':
-			const googleToken = await getGoogleToken();
-
-			session = await createSession('google', googleToken);
-			saveSession(session);
-
-			page = 'resume';
-			return await refresh();
+			return await render('user');
 
 
 		case 'user':
@@ -83,8 +85,7 @@ async function refresh(): Promise<void> {
 						bid,
 						name: bn
 					}
-					page = 'band';
-					await refresh();
+					await render('band');
 				};
 				a.innerText = bn;
 				li.appendChild(a);
@@ -162,10 +163,10 @@ async function refresh(): Promise<void> {
 
 			button.onclick = async () => {
 				const track = await Track.record(store);
-				track.onchange = () => refresh();
+				track.onchange = () => render();
 				tracks.push(track);
 
-				await refresh();
+				await render();
 			};
 
 			divMain.appendChild(header);
@@ -182,9 +183,9 @@ async function refresh(): Promise<void> {
 		const logoutButton = document.createElement('input');
 		logoutButton.type = 'button';
 		logoutButton.value = 'Log out';
-		logoutButton.onclick = () => {
+		logoutButton.onclick = async () => {
 			clearSession();
-			window.location.reload();
+			await render('login');
 		};
 
 		divTop.appendChild(nameSpan);
@@ -257,7 +258,7 @@ function getGoogleToken(): Promise<string> {
 		document.getElementById('main')?.appendChild(el);
 		
 		google.accounts.id.initialize({
-			log_level: 'debug',
+			// log_level: 'debug',
 			client_id: googleAuthClientId,
 			callback: async result => {
 				const googleToken = result.credential;

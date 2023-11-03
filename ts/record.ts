@@ -79,6 +79,8 @@ export class Playable {
     source.connect(x.destination);
     source.start();
 
+    source.onended = () => this.track.sink(this);
+
     this.track.sink(new Playing(this, source));
 	}
 }
