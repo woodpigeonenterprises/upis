@@ -1,6 +1,6 @@
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { AwsCreds } from "../api/src/users.js";
-import { Playable, record } from "./record.ts";
+import { Playable, Recording, isPlayable, record } from "./record.ts";
 
 let audio: AudioContext|undefined;
 
@@ -8,7 +8,9 @@ let page: 'login'|'user'|'band' = 'login';
 let session: Session;
 let user: User;
 let band: Band;
-let recordings: Playable[] = [];
+let tracks: Track[] = [];
+
+type Track = { item: Recording|Playable };
 
 const serverUrl = 'http://localhost:9999';
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
@@ -118,19 +120,29 @@ async function refresh(): Promise<void> {
 			
 			const recordingsUl = document.createElement('ul');
 
-			for(let r of recordings) {
+			for(const { item:r } of tracks) {
 				const li = document.createElement('li');
 				li.innerHTML = r.id;
 
-				const b = document.createElement('input');
-				b.type = 'button';
-				b.value = 'Play';
-				b.onclick = async () => {
-					await r.play(audio ??= new AudioContext());
-				};
+				if(isPlayable(r)) {
+					const b = document.createElement('input');
+					b.type = 'button';
+					b.value = 'Play';
+					b.onclick = async () => {
+						await r.play(audio ??= new AudioContext());
+					};
 
-				li.appendChild(b);
-				
+					li.appendChild(b);
+				}
+				else {
+					const b = document.createElement('input');
+					b.type = 'button';
+					b.value = 'Stop';
+					b.onclick = () => r.stop();
+
+					li.appendChild(b);
+				}
+
 				recordingsUl.appendChild(li);
 			}
 
@@ -140,7 +152,14 @@ async function refresh(): Promise<void> {
 
 			button.onclick = async () => {
 				const recording = await record();
-				recordings.push(recording);
+				const track: Track = { item: recording };
+
+				recording.oncomplete = async p => {
+					track.item = p;
+					await refresh();
+				};
+				
+				tracks.push(track);
 				await refresh();
 			};
 
