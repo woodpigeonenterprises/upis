@@ -1,6 +1,6 @@
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { AwsCreds } from "../api/src/users.js";
-import { Playable, Recording, isPlayable, record } from "./record.ts";
+import { isPlayable, Track } from "./record.ts";
 
 let audio: AudioContext|undefined;
 
@@ -9,8 +9,6 @@ let session: Session;
 let user: User;
 let band: Band;
 let tracks: Track[] = [];
-
-type Track = { item: Recording|Playable };
 
 const serverUrl = 'http://localhost:9999';
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
@@ -120,16 +118,16 @@ async function refresh(): Promise<void> {
 			
 			const recordingsUl = document.createElement('ul');
 
-			for(const { item:r } of tracks) {
+			for(const { info, state } of tracks) {
 				const li = document.createElement('li');
-				li.innerHTML = r.id;
+				li.innerHTML = info.id;
 
-				if(isPlayable(r)) {
+				if(isPlayable(state)) {
 					const b = document.createElement('input');
 					b.type = 'button';
 					b.value = 'Play';
 					b.onclick = async () => {
-						await r.play(audio ??= new AudioContext());
+						await state.play(audio ??= new AudioContext());
 					};
 
 					li.appendChild(b);
@@ -138,7 +136,7 @@ async function refresh(): Promise<void> {
 					const b = document.createElement('input');
 					b.type = 'button';
 					b.value = 'Stop';
-					b.onclick = () => r.stop();
+					b.onclick = () => state.stop();
 
 					li.appendChild(b);
 				}
@@ -151,15 +149,10 @@ async function refresh(): Promise<void> {
 			button.value = 'Record';
 
 			button.onclick = async () => {
-				const recording = await record();
-				const track: Track = { item: recording };
-
-				recording.oncomplete = async p => {
-					track.item = p;
-					await refresh();
-				};
-				
+				const track = await Track.record();
+				track.onchange = () => refresh();
 				tracks.push(track);
+
 				await refresh();
 			};
 
@@ -200,7 +193,16 @@ function trySummonSession(): Session|false {
 	if(found) {
 		const s = JSON.parse(found) as Session;
 
-		if(s.expires > Date.now() + 60 * 1000) {
+		const now = Date.now();
+		const remaining = s.expires - now;
+
+		console.log(
+			'now:', now,
+			'expires:', s.expires,
+			'remaining:', remaining 
+		);
+		
+		if(now < s.expires - (60 * 1000)) {
 			return s;
 		}
 	}
