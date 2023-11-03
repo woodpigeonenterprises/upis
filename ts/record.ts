@@ -65,14 +65,14 @@ export class Recording {
 
 export class Playable {
   readonly track: TrackContext
-	readonly blob: Blob
-	
+  readonly blob: Blob
+  
   constructor(track: TrackContext, blob: Blob) {
     this.track = track;
-		this.blob = blob;
+    this.blob = blob;
   }
 
-	async play(x: AudioContext): Promise<void> {
+  async play(x: AudioContext): Promise<void> {
     const source = x.createBufferSource();
     source.buffer = await x.decodeAudioData(await this.blob.arrayBuffer());;
 
@@ -82,13 +82,13 @@ export class Playable {
     source.onended = () => this.track.sink(this);
 
     this.track.sink(new Playing(this, source));
-	}
+  }
 }
 
 export class Playing {
   readonly inner: Playable;
   readonly source: AudioBufferSourceNode;
-	
+  
   constructor(inner: Playable, source: AudioBufferSourceNode) {
     this.inner = inner;
     this.source = source;

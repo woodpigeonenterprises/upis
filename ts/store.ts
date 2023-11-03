@@ -49,19 +49,19 @@ export async function openStore(): Promise<Store> {
 // const openingDb = window.indexedDB.open('upis', 1);
 
 // openingDb.addEventListener('success', () => {
-// 	db = openingDb.result;
-// 	db.transaction('upis_track', 'readwrite').objectStore('upis_track').add({ id: 'blah123' });
-// 	console.log('opened db!');
+//  db = openingDb.result;
+//  db.transaction('upis_track', 'readwrite').objectStore('upis_track').add({ id: 'blah123' });
+//  console.log('opened db!');
 // });
 
 // openingDb.addEventListener('upgradeneeded', () => {
-// 	db = openingDb.result;
+//  db = openingDb.result;
 
-// 	const store = db.createObjectStore('upis_track', { keyPath: 'id' })
+//  const store = db.createObjectStore('upis_track', { keyPath: 'id' })
 
-// 	store.add('test123');
-	
-// 	console.log('set up db!', store);
+//  store.add('test123');
+  
+//  console.log('set up db!', store);
 // });
 
 
