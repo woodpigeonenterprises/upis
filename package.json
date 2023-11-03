@@ -4,18 +4,18 @@
   "version": "0.0.1",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "webpack --watch & http-server -p 8081 ./dist",
+    "dev": "webpack serve",
     "build": "webpack"
   },
   "devDependencies": {
     "@types/google-one-tap": "^1.2.4",
     "@types/google.accounts": "^0.0.13",
     "html-webpack-plugin": "^5.5.3",
-    "http-server": "^14.1.1",
     "ts-loader": "^9.5.0",
     "typescript": "^5.2.2",
     "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.4"
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.438.0",

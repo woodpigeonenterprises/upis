@@ -30,5 +30,11 @@ export default {
 
   resolve: {
     extensions: ['.tsx', '.ts', '.js'],
+  },
+
+	devtool: "inline-source-map",
+
+  devServer: {
+		port: 8081,
   }
 };

@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand, GetItemCommandOutput } from "@aws-sdk/client-dynamodb";
 import { AwsCreds } from "../api/src/users.js";
 import { isPlayable, Track } from "./record";
 import { openStore } from "./store"
@@ -8,7 +8,7 @@ let audio: AudioContext|undefined;
 
 const store = await openStore();
 
-let page: 'login'|'user'|'band' = 'login';
+let page: 'resume'|'login'|'user'|'band' = 'resume';
 let session: Session;
 let user: User;
 let band: Band;
@@ -18,7 +18,7 @@ const serverUrl = 'http://localhost:9999';
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
 
 window.onload = async () => {
-	page = 'login';
+	page = 'resume';
 	await refresh();
 };
 		
@@ -30,17 +30,14 @@ async function refresh(): Promise<void> {
 	divMain.innerHTML = '';
 	
 	switch(page) {
-		case 'login':
+		case 'resume':
 			const summoned = trySummonSession();
+			if(!summoned) {
+				page = 'login';
+				return await refresh();
+			}
 
-			if(summoned) {
-				session = summoned;
-			}
-			else {
-				const googleToken = await getGoogleToken();
-				session = await createSession('google', googleToken);
-				saveSession(session);
-			}
+			session = summoned;
 
 			const dynamo = new DynamoDBClient({
 				region: 'eu-west-1',
@@ -49,13 +46,24 @@ async function refresh(): Promise<void> {
 
 			const loaded = await loadUser(dynamo, session.uid);
 			if(!loaded) {
-				document.write(`User ${session.uid} not set up`);
-				return;
+				page = 'login';
+				return await refresh();
 			}
 
 			user = loaded;
 			page = 'user';
 			return await refresh();
+
+			
+		case 'login':
+			const googleToken = await getGoogleToken();
+
+			session = await createSession('google', googleToken);
+			saveSession(session);
+
+			page = 'resume';
+			return await refresh();
+
 
 		case 'user':
 			renderTopBar();
@@ -266,22 +274,34 @@ function getGoogleToken(): Promise<string> {
 
 
 async function loadUser(dynamo: DynamoDBClient, uid: string): Promise<User|false> {
-	const r = await dynamo.send(new GetItemCommand({
-		TableName: 'upis',
-		Key: {
-			key: { S: `user/${uid}` }
+	let r: GetItemCommandOutput|undefined = undefined;
+	
+	try {
+		r = await dynamo.send(new GetItemCommand({
+			TableName: 'upis',
+			Key: {
+				key: { S: `user/${uid}` }
+			}
+		}));
+	}
+	catch(e) {
+		if(e instanceof Error && e.name == 'ExpiredTokenException') {
+			return false;
 		}
-	}));
+	}
 
-	if(!r.Item) return false;
+	if(!!r && !!r.Item) {
+		const user = r.Item;
 
-	const user = r.Item;
-	console.log('Got user', user);
+		console.log('Got user', user);
 
-	return {
-		name: r.Item.name.S as string,
-		bands: new Map(Object.entries(r.Item.bands.M!).map(([k, v]) => [k, v.S!]))
-	};
+		return {
+			name: r.Item.name.S as string,
+			bands: new Map(Object.entries(r.Item.bands.M!).map(([k, v]) => [k, v.S!]))
+		};
+	}
+
+	return false;
 }
 
 
