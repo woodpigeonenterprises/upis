@@ -3,10 +3,17 @@ import { AwsCreds } from "../api/src/users.js";
 import { isPlayable, Track } from "./record";
 import { openStore } from "./store"
 import { Band, Session, User } from "./model";
+import { runJobQueue } from "./queue";
 
 let audio: AudioContext|undefined;
 
-const store = await openStore();
+const [store, jobs] = await Promise.all([
+	openStore(),
+	runJobQueue(async job => {
+		console.log('Handling job', job);
+		return true;
+	})
+]);
 
 let page: 'resume'|'login'|'user'|'band' = 'resume';
 let session: Session;
@@ -23,6 +30,9 @@ const serverUrl = 'http://localhost:9999';
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
 
 window.onload = async () => {
+
+	jobs.addJob('moomoomoo', { due: Date.now() + 10000 });
+	
   await render('resume');
 };
     

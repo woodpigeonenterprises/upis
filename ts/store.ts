@@ -32,11 +32,8 @@ export async function openStore(): Promise<Store> {
 
   return {
     async saveBlob(id: BlobId, blob: Blob) {
-      console.log('saving blob', id);
-
       await db.put('blobs', { stream: id.stream, idx: id.idx, blob });
       console.log('saved blob', id);
-
       return id;
     }
   };
