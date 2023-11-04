@@ -36,5 +36,13 @@ export default {
 
   devServer: {
 		port: 8081,
+			server: {
+				type: 'https',
+				options: {
+					ca: './certs/woodpigeon-ca.crt',
+					cert: './certs/localhost.crt',
+					key: './certs/localhost.key',
+				}
+			}
   }
 };
