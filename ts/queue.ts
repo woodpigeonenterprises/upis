@@ -9,11 +9,14 @@ type JobOpts = {
 
 type JobHandler = (job: unknown) => Promise<true|number>;
 
-export async function runJobQueue(handler: JobHandler) {
-  const db = await openDB('jobs', 1, {
-    upgrade(db, oldVersion, newVersion) {
-      console.log('IDB UPGRADE!!!', oldVersion, newVersion);
+export interface JobQueue {
+  running: Promise<void>
+  addJob(job: unknown, opts?: JobOpts): Promise<JobId>
+};
 
+export async function runJobQueue(name: string, handler: JobHandler): Promise<JobQueue> {
+  const db = await openDB(`jobs_${name}`, 1, {
+    upgrade(db, oldVersion, newVersion) {
       switch(`${oldVersion} -> ${newVersion}`) {
         case '0 -> 1':
           const s = db.createObjectStore('jobs', { keyPath: 'id' });

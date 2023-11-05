@@ -8,10 +8,8 @@ export type Store = {
   saveBlob: BlobSaver
 };
 
-
-
-export async function openStore(): Promise<Store> {
-  const db = await openDB('upis', 1, {
+export async function openStore(name: string): Promise<Store> {
+  const db = await openDB(`upis_${name}`, 1, {
     upgrade(db, oldVersion, newVersion) {
       console.log('IDB UPGRADE!!!', oldVersion, newVersion);
       

@@ -1,38 +1,26 @@
 import { DynamoDBClient, GetItemCommand, GetItemCommandOutput } from "@aws-sdk/client-dynamodb";
 import { AwsCreds } from "../api/src/users.js";
 import { isPlayable, Track } from "./record";
-import { openStore } from "./store"
+import { Store, openStore } from "./store"
 import { Band, Session, User } from "./model";
-import { runJobQueue } from "./queue";
+import { JobQueue, runJobQueue } from "./queue";
 
 let audio: AudioContext|undefined;
 
-const [store, jobs] = await Promise.all([
-	openStore(),
-	runJobQueue(async job => {
-		console.log('Handling job', job);
-		return true;
-	})
-]);
+let page: 'login'|'logout'|'resume'|'user'|'band' = 'resume';
 
-let page: 'resume'|'login'|'user'|'band' = 'resume';
 let session: Session;
+let store: Store;
+let jobs: JobQueue;
+
 let user: User;
 let band: Band;
 let tracks: Track[] = [];
 
-// 
-//
-//
-//
-
-const serverUrl = 'http://localhost:9999';
+const serverUrl = "http://localhost:9999";
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
 
 window.onload = async () => {
-
-	jobs.addJob('moomoomoo', { due: Date.now() + 10000 });
-	
   await render('resume');
 };
     
@@ -54,6 +42,10 @@ async function render(nextPage?: typeof page): Promise<void> {
 
       return await render('resume');
 
+		case 'logout':
+			clearSession();
+			//todo close store and job queue here
+			return await render('login');
 
     case 'resume':
       const summoned = trySummonSession();
@@ -62,20 +54,30 @@ async function render(nextPage?: typeof page): Promise<void> {
       }
 
       session = summoned;
+			const uid = session.uid;
+
+			[store, jobs] = await Promise.all([
+				openStore(uid),
+				runJobQueue(uid, async job => {
+					console.log('Handling job', job);
+					return true;
+				})
+			]);
+
+			jobs.addJob('hello', { due: Date.now() + 10000 });
 
       const dynamo = new DynamoDBClient({
         region: 'eu-west-1',
         credentials: session.awsCreds
       });
 
-      const loaded = await loadUser(dynamo, session.uid);
+      const loaded = await loadUser(dynamo, uid);
       if(!loaded) {
-        return await render('login');
+        return await render('logout');
       }
 
       user = loaded;
       return await render('user');
-
 
     case 'user':
       renderTopBar();
@@ -193,23 +195,12 @@ async function render(nextPage?: typeof page): Promise<void> {
     const logoutButton = document.createElement('input');
     logoutButton.type = 'button';
     logoutButton.value = 'Log out';
-    logoutButton.onclick = async () => {
-      clearSession();
-      await render('login');
-    };
+    logoutButton.onclick = () => render('logout');
 
     divTop.appendChild(nameSpan);
     divTop.appendChild(logoutButton);
   }
 }
-
-
-
-
-function clearSession() {
-  window.localStorage.removeItem('upis_session');
-}
-
 
 function trySummonSession(): Session|false {
   const found = window.localStorage.getItem('upis_session');
@@ -231,6 +222,10 @@ function trySummonSession(): Session|false {
   }
 
   return false;
+}
+
+function clearSession() {
+  window.localStorage.removeItem('upis_session');
 }
 
 function saveSession(session: Session): void {

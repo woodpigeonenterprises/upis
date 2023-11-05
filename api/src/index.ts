@@ -81,7 +81,7 @@ router.post('/band', async x => {
 
 app
   .use(cors({
-    origin: 'http://localhost:8081',
+    origin: 'https://localhost:8081',
     allowMethods: ['GET','PUT','POST'],
     credentials: true
   }))
