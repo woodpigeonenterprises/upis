@@ -1,4 +1,6 @@
+import { JobHandler, JobQueue } from "./queue";
 import { Store } from "./store"
+import { delay } from "./util";
 
 export function isPlayable(v: unknown): v is Playable {
   const p = (<any>v).play;
@@ -51,7 +53,11 @@ export class Recording {
     this.parts.push(blob);
 
     await this.track.store.saveBlob(blobId, blob);
-    //store must guarantee order above todo
+
+    await this.track.jobs.addJob({
+      type: 'persistTrack',
+      track: { id: this.track.id }
+    });
   }
 
   private complete() {
@@ -118,7 +124,16 @@ export class Track {
     if(this.onchange) this.onchange(this);
   }
 
-  static async record(store: Store): Promise<Track> {
+
+
+  static jobHandler: JobHandler = async job => {
+    console.log('PERSIST', job);
+    await delay(1000);
+    return true as const;
+  };
+  
+
+  static async record(store: Store, jobs: JobQueue): Promise<Track> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const mimeType = 'audio/ogg;codecs=opus'
@@ -135,7 +150,8 @@ export class Track {
     const context: TrackContext = {
       ...info,
       sink: s => track.sink(s),
-      store
+      store,
+      jobs
     };
 
     const recording = new Recording(context, recorder);
@@ -156,5 +172,6 @@ interface TrackInfo {
 interface TrackContext extends TrackInfo {
   sink: Sink
   store: Store
+  jobs: JobQueue
 }
 

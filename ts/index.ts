@@ -4,6 +4,7 @@ import { isPlayable, Track } from "./record";
 import { Store, openStore } from "./store"
 import { Band, Session, User } from "./model";
 import { JobQueue, runJobQueue } from "./queue";
+import { delay } from "./util";
 
 let audio: AudioContext|undefined;
 
@@ -58,13 +59,15 @@ async function render(nextPage?: typeof page): Promise<void> {
 
 			[store, jobs] = await Promise.all([
 				openStore(uid),
-				runJobQueue(uid, async job => {
+				runJobQueue(uid, job => {
 					console.log('Handling job', job);
-					return true;
+
+					//todo some kind of branching on job type
+					return Track.jobHandler(job);
 				})
 			]);
 
-			jobs.addJob('hello', { due: Date.now() + 10000 });
+			// jobs.addJob('hello', { due: Date.now() + 10000 });
 
       const dynamo = new DynamoDBClient({
         region: 'eu-west-1',
@@ -174,7 +177,7 @@ async function render(nextPage?: typeof page): Promise<void> {
       button.value = 'Record';
 
       button.onclick = async () => {
-        const track = await Track.record(store);
+        const track = await Track.record(store, jobs);
         track.onchange = () => render();
         tracks.push(track);
 

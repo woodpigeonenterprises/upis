@@ -7,7 +7,7 @@ type JobOpts = {
   due?: number
 };
 
-type JobHandler = (job: unknown) => Promise<true|number>;
+export type JobHandler = (job: unknown) => Promise<true|number>|false;
 
 export interface JobQueue {
   running: Promise<void>
@@ -60,7 +60,7 @@ export async function runJobQueue(name: string, handler: JobHandler): Promise<Jo
         parallelism
       );
 
-      console.log('Found jobs', found);
+      // console.log('Found jobs', found);
 
       if(found.length > 0) {
         const tx = db.transaction('jobs', 'readwrite');
@@ -72,13 +72,22 @@ export async function runJobQueue(name: string, handler: JobHandler): Promise<Jo
         ]);
 
         await Promise.all(found.map(async i => {
-          const result = await handler(i);
+          const job = i.job;
 
-          if(result === true) {
-            await db.delete('jobs', i.id);
+          const outerResult = handler(job);
+
+          if(outerResult) {
+            const result = await outerResult;
+            
+            if(result === true) {
+              await db.delete('jobs', i.id);
+            }
+            else {
+              await db.put('jobs', { ...i, due: Date.now() + result });
+            }
           }
           else {
-            await db.put('jobs', { ...i, due: Date.now() + result });
+            throw Error(`Handler refuses job ${job}`);
           }
         }));
       }
