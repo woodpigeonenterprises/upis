@@ -57,15 +57,13 @@ async function render(nextPage?: typeof page): Promise<void> {
       session = summoned;
 			const uid = session.uid;
 
-			[store, jobs] = await Promise.all([
-				openStore(uid),
-				runJobQueue(uid, job => {
-					console.log('Handling job', job);
+			store = await openStore(uid);
+			jobs = await runJobQueue(uid, job => {
+				console.log('Handling job', job);
 
-					//todo some kind of branching on job type
-					return Track.jobHandler(job);
-				})
-			]);
+				//todo some kind of branching on job type
+				return Track.createJobHandler(store)(job);
+			})
 
 			// jobs.addJob('hello', { due: Date.now() + 10000 });
 
@@ -177,7 +175,7 @@ async function render(nextPage?: typeof page): Promise<void> {
       button.value = 'Record';
 
       button.onclick = async () => {
-        const track = await Track.record(store, jobs);
+        const track = await Track.record(band.bid, store, jobs);
         track.onchange = () => render();
         tracks.push(track);
 
@@ -209,6 +207,7 @@ function trySummonSession(): Session|false {
   const found = window.localStorage.getItem('upis_session');
   if(found) {
     const s = JSON.parse(found) as Session;
+
 
     const now = Date.now();
     const remaining = s.expires - now;

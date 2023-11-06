@@ -7,7 +7,7 @@ type JobOpts = {
   due?: number
 };
 
-export type JobHandler = (job: unknown) => Promise<true|number>|false;
+export type JobHandler = (job: unknown) => Promise<boolean|number>;
 
 export interface JobQueue {
   running: Promise<void>
@@ -74,20 +74,16 @@ export async function runJobQueue(name: string, handler: JobHandler): Promise<Jo
         await Promise.all(found.map(async i => {
           const job = i.job;
 
-          const outerResult = handler(job);
+          const result = await handler(job);
 
-          if(outerResult) {
-            const result = await outerResult;
-            
-            if(result === true) {
-              await db.delete('jobs', i.id);
-            }
-            else {
-              await db.put('jobs', { ...i, due: Date.now() + result });
-            }
+          if(result === true) {
+            await db.delete('jobs', i.id);
+          }
+          else if(typeof result === 'number') {
+            await db.put('jobs', { ...i, due: Date.now() + result });
           }
           else {
-            throw Error(`Handler refuses job ${job}`);
+            console.warn(`Handler refuses job ${job}`);
           }
         }));
       }
@@ -96,7 +92,8 @@ export async function runJobQueue(name: string, handler: JobHandler): Promise<Jo
       }
 
       // wot about locking?
-      // think it's fine as long as we only have one runner
+      // TODO use WebLock API to lock !!!!!
+      // (we did https especially for this!)
     }
   }
   

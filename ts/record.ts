@@ -52,6 +52,13 @@ export class Recording {
     
     this.parts.push(blob);
 
+    if(this.parts.length == 1) {
+      //first blob
+      //must save track to local db for persist jobs to pick up
+      //track entry will have persist state
+      await this.track.store.saveTrack(this.track.getTrack());
+    }
+
     await this.track.store.saveBlob(blobId, blob);
 
     await this.track.jobs.addJob({
@@ -108,13 +115,37 @@ export class Playing {
   }
 }
 
+
+
+type Local = {
+  type: 'local'
+}
+
+type Uploading = {
+  type: 'uploading'
+}
+
+type Uploaded = {
+  type: 'uploaded'
+}
+
+export type TrackPersistState = Local|Uploading|Uploaded;
+
+export type PersistableTrack = {
+  info: TrackInfo,
+  persistState: TrackPersistState
+}
+
+
 export class Track {
   readonly info: TrackInfo
   state: State
+  persistState: TrackPersistState
 
-  private constructor(info: TrackInfo, state: Recording|Playable|Playable) {
+  private constructor(info: TrackInfo, state: State, persistState: TrackPersistState) {
     this.info = info;
     this.state = state;
+    this.persistState = persistState;
   }
 
   onchange?: (t:Track)=>void
@@ -124,16 +155,33 @@ export class Track {
     if(this.onchange) this.onchange(this);
   }
 
+  private sinkPersistState(state: TrackPersistState) {
+    throw 'unimpl';
+  }
 
+  static createJobHandler = (store: Store) => async (job: unknown) => {
+    if(isPersistTrackJob(job)) {
+      console.log('PERSIST', job);
 
-  static jobHandler: JobHandler = async job => {
-    console.log('PERSIST', job);
-    await delay(1000);
-    return true as const;
+      const track = await store.loadTrack(job.trackId);
+      if(!track) return false;
+
+      switch(track.persistState.type) {
+        case 'local':
+          break;
+
+        case 'uploading':
+          break;
+      }
+
+      await delay(1000);
+      return true;
+    }
+
+    return false;
   };
-  
 
-  static async record(store: Store, jobs: JobQueue): Promise<Track> {
+  static async record(bandId: string, store: Store, jobs: JobQueue): Promise<Track> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const mimeType = 'audio/ogg;codecs=opus'
@@ -141,6 +189,7 @@ export class Track {
     const recorder = new MediaRecorder(stream, { mimeType });
 
     const info: TrackInfo = {
+      bandId,
       id: crypto.randomUUID(),
       mimeType
     };
@@ -151,12 +200,13 @@ export class Track {
       ...info,
       sink: s => track.sink(s),
       store,
-      jobs
+      jobs,
+      getTrack() { return track; }
     };
 
     const recording = new Recording(context, recorder);
 
-    track = new Track(context, recording);
+    track = new Track(context, recording, { type: 'local' });
 
     recording.start();
 
@@ -165,6 +215,7 @@ export class Track {
 }
 
 interface TrackInfo {
+  bandId: string,
   id: string
   mimeType: string
 }
@@ -173,5 +224,16 @@ interface TrackContext extends TrackInfo {
   sink: Sink
   store: Store
   jobs: JobQueue
+  getTrack(): Track
 }
 
+
+
+type PersistTrackJob = {
+  type: 'persistTrack',
+  trackId: string
+}
+
+function isPersistTrackJob(v: unknown): v is PersistTrackJob {
+  return (<any>v).type == 'persistTrack';
+}
