@@ -117,6 +117,7 @@ async function render(nextPage?: typeof page): Promise<void> {
       createBand.value = 'Create Band!';
 
       createBand.onclick = async () => {
+
         const r = await fetch(`${serverUrl}/band`, {
           method: 'POST',
           headers: {

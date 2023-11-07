@@ -157,8 +157,6 @@ export class Track implements PersistableTrack
 
   static createJobHandler = (store: Store) => async (job: unknown) => {
     if(isPersistTrackJob(job)) {
-      console.log('PERSIST', job);
-
       const track = await store.loadTrack(job.track.id);
       if(!track) {
         console.error(`failed to load track ${job.track.id}`)
@@ -168,6 +166,29 @@ export class Track implements PersistableTrack
       switch(track.persistState.type) {
         case 'local':
           console.log('PERSIST LOCAL')
+
+          const bid = track.info.bandId;
+
+          const r = await fetch(`http://localhost:9999/bands/${bid}/tracks`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name: 'HELLO!'
+            }),
+            credentials: 'include',
+            mode: 'cors'
+          });
+
+          //contact api
+          //api will assign nice sequence number
+          //api will give us token to persist to certain addresses
+
+          //on response, track enters new state of Uploading (in which it will remain till we finalize the upload)
+
+
+          
           break;
 
         case 'uploading':

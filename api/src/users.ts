@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand, TransactWriteItemsCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand, PutItemCommand, TransactWriteItemsCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { err } from "./util.js";
 import { randomUUID } from "crypto";
@@ -29,7 +29,8 @@ export async function createBand(uid: string, name: string) {
           Item: {
             key: { S: `band/${bid}` },
             users: { SS: [uid] },
-            name: { S: name }
+            name: { S: name },
+            nextTrackId: { N: '1' }
           }
         }
       },
@@ -52,6 +53,36 @@ export async function createBand(uid: string, name: string) {
   console.log(r);
 }
 
+//wouldn't have to claim if we went for time-based UUIDs here instead...
+//would save db interaction
+export async function claimTrackId(bid: string): Promise<string> {
+  const r = await dynamo.send(new UpdateItemCommand({
+    TableName: 'upis',
+    Key: { key: { S: `band/${bid}` } },
+    UpdateExpression: 'SET nextTrackId = nextTrackId + :inc',
+    ExpressionAttributeValues: {
+      ':inc': { N: '1' }
+    },
+    ReturnValues: 'UPDATED_OLD'
+  }));
+
+  const claimed = r.Attributes?.nextTrackId?.N;
+  if(!claimed) throw 'Claimed number not returned';
+
+  return claimed;
+}
+
+export async function createTrack(bid: string, tid: string) {
+  const r = await dynamo.send(new PutItemCommand({
+    TableName: 'upis',
+    Item: { key: { S: `track/${bid}/${tid}` } }
+  }));
+
+  return 'BLAH';
+}
+
+
+
 export async function userExists(uid: string): Promise<boolean> {
   const r = await dynamo.send(new GetItemCommand({
     TableName: 'upis',
@@ -60,6 +91,28 @@ export async function userExists(uid: string): Promise<boolean> {
   }));
 
   return !!r.Item;
+}
+
+export async function loadUser(uid: string): Promise<User|false> {
+  const r = await dynamo.send(new GetItemCommand({
+    TableName: 'upis',
+    Key: { key: { S: `user/${uid}` } },
+    AttributesToGet: ['state', 'bands']
+  }));
+
+  console.log('Got', r.Item);
+
+  const item = r.Item;
+  if(!item) return false;
+
+  const bands = item.bands?.M;
+  if(!bands) return false;
+
+  return {
+    uid,
+    bands,
+    state: {}
+  }
 }
 
 
@@ -100,5 +153,11 @@ export type AwsCreds = {
   secretAccessKey: string,
   sessionToken: string,
   expires: number
+}
+
+export type User = {
+  uid: string,
+  state: unknown,
+  bands: Record<string, unknown>
 }
 
