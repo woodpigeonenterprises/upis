@@ -1,13 +1,13 @@
 import { openDB } from "idb";
-import { Track } from "./record";
+import { PersistableTrack, isPersistedTrack } from "./record";
 
 type BlobId = { stream: string, idx: number };
 type BlobSaver = (id: BlobId, blob: Blob) => Promise<BlobId>;
 
 export type Store = {
   saveBlob: BlobSaver
-  saveTrack(track: Track): Promise<void>
-  loadTrack(trackId: string): Promise<Track|false>
+  saveTrack(track: PersistableTrack): Promise<void>
+  loadTrack(trackId: string): Promise<PersistableTrack|false>
 };
 
 export async function openStore(name: string): Promise<Store> {
@@ -18,7 +18,10 @@ export async function openStore(name: string): Promise<Store> {
       switch(`${oldVersion} -> ${newVersion}`) {
         case '0 -> 1':
           db.createObjectStore('blobs', { keyPath: ['stream', 'idx'] });
-          db.createObjectStore('tracks', { keyPath: ['bandId', 'date', 'id'] });
+
+          db.createObjectStore('tracks', { keyPath: ['info.id'] })
+              .createIndex('byBand', ['info.bandId', 'date', 'info.id']);
+
           break;
       }
     }
@@ -38,19 +41,29 @@ export async function openStore(name: string): Promise<Store> {
       return id;
     },
 
-    async saveTrack(track: Track): Promise<void> {
+    async saveTrack(track: PersistableTrack): Promise<void> {
       await db.put('tracks', {
-        bandId: track.info.bandId,
         date: Date.now(),
-        id: track.info.id,
+        info: track.info,
         persistState: track.persistState
       });
     },
 
-    async loadTrack(id: string): Promise<Track|false> {
-      //todo
+    async loadTrack(id: string): Promise<PersistableTrack|false> {
+      console.log('LOADING TRACK', id);
+      
+      const track = await db.get('tracks', [id]);
+      if(!track) return false;
+
+      if(isPersistedTrack(track)) {
+        console.log('LOADED TRACK', track)
+        return track;
+      }
+
+      console.error('Bad track loaded', track)
       return false;
     }
   };
 }
+
 

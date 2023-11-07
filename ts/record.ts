@@ -1,4 +1,4 @@
-import { JobHandler, JobQueue } from "./queue";
+import { JobQueue } from "./queue";
 import { Store } from "./store"
 import { delay } from "./util";
 
@@ -25,7 +25,7 @@ export class Recording {
   start(): Promise<void> {
     return new Promise<void>(resolve => {
       this.recorder.onstart = () => {
-        console.log('Recording', this.track.id, 'started')
+        console.log('Recording', this.track.info.id, 'started')
         resolve();
       };
 
@@ -35,7 +35,7 @@ export class Recording {
       };
 
       this.recorder.onstop = async e => {
-        console.log('Recording', this.track.id, 'complete of', this.parts.length, 'blob parts');
+        console.log('Recording', this.track.info.id, 'complete of', this.parts.length, 'blob parts');
         this.complete();
       };
 
@@ -48,7 +48,7 @@ export class Recording {
   }
 
   private async pushBlob(blob: Blob) {
-    const blobId = { stream: this.track.id, idx: this._nextBlobId++ };
+    const blobId = { stream: this.track.info.id, idx: this._nextBlobId++ };
     
     this.parts.push(blob);
 
@@ -56,19 +56,19 @@ export class Recording {
       //first blob
       //must save track to local db for persist jobs to pick up
       //track entry will have persist state
-      await this.track.store.saveTrack(this.track.getTrack());
+      await this.track.store.saveTrack(this.track.persistable());
     }
 
     await this.track.store.saveBlob(blobId, blob);
 
     await this.track.jobs.addJob({
       type: 'persistTrack',
-      track: { id: this.track.id }
+      track: { id: this.track.info.id }
     });
   }
 
   private complete() {
-    const blob = new Blob(this.parts, { type: this.track.mimeType });
+    const blob = new Blob(this.parts, { type: this.track.info.mimeType });
 
     console.log('Created blob of type', blob.type, 'of size', blob.size);
 
@@ -131,13 +131,9 @@ type Uploaded = {
 
 export type TrackPersistState = Local|Uploading|Uploaded;
 
-export type PersistableTrack = {
-  info: TrackInfo,
-  persistState: TrackPersistState
-}
 
-
-export class Track {
+export class Track implements PersistableTrack
+{
   readonly info: TrackInfo
   state: State
   persistState: TrackPersistState
@@ -163,14 +159,19 @@ export class Track {
     if(isPersistTrackJob(job)) {
       console.log('PERSIST', job);
 
-      const track = await store.loadTrack(job.trackId);
-      if(!track) return false;
+      const track = await store.loadTrack(job.track.id);
+      if(!track) {
+        console.error(`failed to load track ${job.track.id}`)
+        return true;
+      }
 
       switch(track.persistState.type) {
         case 'local':
+          console.log('PERSIST LOCAL')
           break;
 
         case 'uploading':
+          console.log('PERSIST UPLOADING')
           break;
       }
 
@@ -197,16 +198,19 @@ export class Track {
     let track: Track;
 
     const context: TrackContext = {
-      ...info,
+      info,
       sink: s => track.sink(s),
       store,
       jobs,
-      getTrack() { return track; }
+      persistable(): PersistableTrack
+      {
+        return track;
+      }
     };
 
     const recording = new Recording(context, recorder);
 
-    track = new Track(context, recording, { type: 'local' });
+    track = new Track(info, recording, { type: 'local' });
 
     recording.start();
 
@@ -214,26 +218,53 @@ export class Track {
   }
 }
 
-interface TrackInfo {
+export interface TrackInfo {
   bandId: string,
   id: string
   mimeType: string
 }
 
-interface TrackContext extends TrackInfo {
+interface TrackContext {
+  info: TrackInfo
   sink: Sink
   store: Store
   jobs: JobQueue
-  getTrack(): Track
+  persistable(): PersistableTrack
+  
 }
 
 
 
 type PersistTrackJob = {
   type: 'persistTrack',
-  trackId: string
+  track: { id: string }
 }
 
 function isPersistTrackJob(v: unknown): v is PersistTrackJob {
   return (<any>v).type == 'persistTrack';
+}
+
+
+
+
+export interface PersistableTrack {
+  info: TrackInfo,
+  persistState: TrackPersistState
+}
+
+export function isPersistedTrack(v: any): v is PersistableTrack {
+  return isTrackInfo(v.info)
+      && isTrackPersistState(v.persistState);
+}
+
+function isTrackInfo(v: any): v is TrackInfo {
+  return !!v
+      && typeof v.bandId === 'string'
+      && typeof v.id === 'string';
+      // && typeof v.mimeType === 'string';
+}
+
+function isTrackPersistState(v: any): v is TrackPersistState {
+  //todo!!!
+  return true;
 }
