@@ -74,7 +74,9 @@ router.post('/band', async x => {
   const name = (<any>x.request.body).name;
   if(typeof name !== 'string') err('Bad name prop');
 
-  await createBand(uid, name);
+  const user = (await loadUser(uid)) || err('User not in db');
+
+  await createBand(user, name);
 
   x.status = 201;
 });

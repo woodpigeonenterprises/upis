@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand, GetItemCommandOutput } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, QueryCommand, QueryCommandOutput } from "@aws-sdk/client-dynamodb";
 import { AwsCreds } from "../api/src/users.js";
 import { isPlayable, Track } from "./record";
 import { Store, openStore } from "./store"
@@ -283,31 +283,58 @@ function getGoogleToken(): Promise<string> {
 
 
 async function loadUser(dynamo: DynamoDBClient, uid: string): Promise<User|false> {
-  let r: GetItemCommandOutput|undefined = undefined;
+  let r: QueryCommandOutput|undefined = undefined;
   
   try {
-    r = await dynamo.send(new GetItemCommand({
-      TableName: 'upis',
-      Key: {
-        key: { S: `user/${uid}` }
+    r = await dynamo.send(new QueryCommand({
+      TableName: 'upis_users',
+      KeyConditionExpression: 'uid = :uid',
+      ExpressionAttributeValues: {
+        ':uid': { S: uid }
       }
     }));
+
+    console.log('Got', r.Items);
+
+    const items = r.Items;
+    if(!items) return false;
+
+    const bands: Record<string, string> = {};
+    let name: string = '';
+
+    for(const item of items) {
+      const sort = item.sort?.S;
+      if(!sort) continue;
+
+      if(sort == 'user') {
+        const n = item.name?.S;
+        if(n && typeof n === 'string') {
+          name = n;
+        }
+        continue;
+      }
+
+      const matched = sort.match(/^band\/(?<bid>.+)/);
+      if(matched && matched.groups) {
+        const bid = matched.groups['bid'];
+
+        const name = item.name?.S;
+        if(name && typeof name === 'string') {
+          bands[bid] = name;
+        }
+      }
+    }
+
+    return {
+      uid,
+      name,
+      bands: new Map(Object.entries(bands))
+    }
   }
   catch(e) {
     if(e instanceof Error && e.name == 'ExpiredTokenException') {
       return false;
     }
-  }
-
-  if(!!r && !!r.Item) {
-    const user = r.Item;
-
-    console.log('Got user', user);
-
-    return {
-      name: r.Item.name.S as string,
-      bands: new Map(Object.entries(r.Item.bands.M!).map(([k, v]) => [k, v.S!]))
-    };
   }
 
   return false;

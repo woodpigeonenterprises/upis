@@ -1,4 +1,4 @@
-import { DynamoDBClient, GetItemCommand, PutItemCommand, TransactWriteItemsCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand, PutItemCommand, QueryCommand, TransactWriteItemsCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { err } from "./util.js";
 import { randomUUID } from "crypto";
@@ -18,32 +18,50 @@ const dynamo = new DynamoDBClient({
   credentials: creds
 });
 
-export async function createBand(uid: string, name: string) {
+export async function createBand(user: User, bandName: string) {
   const bid = randomUUID();
 
   const r = await dynamo.send(new TransactWriteItemsCommand({
     TransactItems: [
       {
         Put: {
-          TableName: 'upis',
+          TableName: 'upis_bands',
           Item: {
-            key: { S: `band/${bid}` },
-            users: { SS: [uid] },
-            name: { S: name },
-            nextTrackId: { N: '1' }
+            bid: { S: bid },
+            sort: { S: 'band' },
+            name: { S: bandName },
+            nextTrackId: { N: '1' },
+            v: { N: '0' }
+          }
+        }
+      },
+      {
+        Put: {
+          TableName: 'upis_bands',
+          Item: {
+            bid: { S: bid },
+            sort: { S: `user/${user.uid}` },
+            name: { S: user.name },
+          }
+        }
+      },
+      {
+        Put: {
+          TableName: 'upis_users',
+          Item: {
+            uid: { S: user.uid },
+            sort: { S: `band/${bid}` },
+            name: { S: bandName },
           }
         }
       },
       {
         Update: {
-          TableName: 'upis',
-          Key: { key: { S: `user/${uid}` }},
-          UpdateExpression: 'SET bands.#bid = :bandName',
-          ExpressionAttributeNames: {
-            '#bid': bid
-          },
+          TableName: 'upis_users',
+          Key: { uid: { S: user.uid }, sort: { S: 'user' } },
+          UpdateExpression: 'SET v = v + :inc',
           ExpressionAttributeValues: {
-            ':bandName': { S: name }
+            ':inc': { N: '1' }
           }
         }
       }
@@ -57,8 +75,8 @@ export async function createBand(uid: string, name: string) {
 //would save db interaction
 export async function claimTrackId(bid: string): Promise<string> {
   const r = await dynamo.send(new UpdateItemCommand({
-    TableName: 'upis',
-    Key: { key: { S: `band/${bid}` } },
+    TableName: 'upis_bands',
+    Key: { bid: { S: bid }, sort: { S: 'band' } },
     UpdateExpression: 'SET nextTrackId = nextTrackId + :inc',
     ExpressionAttributeValues: {
       ':inc': { N: '1' }
@@ -78,6 +96,8 @@ export async function createTrack(bid: string, tid: string) {
     Item: { key: { S: `track/${bid}/${tid}` } }
   }));
 
+  //todo create band/track records above
+
   // if a track is created, we can find it via query based on band
   // tracks should be queried in descending order
   // given STS for particular band (should be an extended session)
@@ -89,8 +109,8 @@ export async function createTrack(bid: string, tid: string) {
 
 export async function userExists(uid: string): Promise<boolean> {
   const r = await dynamo.send(new GetItemCommand({
-    TableName: 'upis',
-    Key: { key: { S: `user/${uid}` } },
+    TableName: 'upis_users',
+    Key: { uid: { S: uid }, sort: { S: 'user' } },
     AttributesToGet: ['state']
   }));
 
@@ -98,22 +118,53 @@ export async function userExists(uid: string): Promise<boolean> {
 }
 
 export async function loadUser(uid: string): Promise<User|false> {
-  const r = await dynamo.send(new GetItemCommand({
-    TableName: 'upis',
-    Key: { key: { S: `user/${uid}` } },
-    AttributesToGet: ['state', 'bands']
+  const r = await dynamo.send(new QueryCommand({
+    TableName: 'upis_users',
+    KeyConditionExpression: 'uid = :uid',
+    ExpressionAttributeValues: {
+      ':uid': { S: uid }
+    }
   }));
+  // const r = await dynamo.send(new GetItemCommand({
+  //   TableName: 'upis_users',
+  //   Key: { uid: { S: uid }, sort: { S: 'user' } },
+  //   AttributesToGet: ['state', 'bands']
+  // }));
 
-  console.log('Got', r.Item);
+  console.log('Got', r.Items);
 
-  const item = r.Item;
-  if(!item) return false;
+  const items = r.Items;
+  if(!items) return false;
 
-  const bands = item.bands?.M;
-  if(!bands) return false;
+  const bands: Record<string, string> = {};
+  let name: string = '';
+
+  for(const item of items) {
+    const sort = item.sort?.S;
+    if(!sort) continue;
+
+    if(sort == 'user') {
+      const n = item.name?.S;
+      if(n && typeof n === 'string') {
+        name = n;
+      }
+      continue;
+    }
+
+    const matched = sort.match(/^band\/(?<bid>.+)/);
+    if(matched && matched.groups) {
+      const bid = matched.groups['bid'];
+
+      const name = item.name?.S;
+      if(name && typeof name === 'string') {
+        bands[bid] = name;
+      }
+    }
+  }
 
   return {
     uid,
+    name,
     bands,
     state: {}
   }
@@ -129,13 +180,15 @@ export async function getUserAwsCreds(uid: string): Promise<AwsCreds> {
       Version: '2012-10-17',
       Statement: {
         Effect: 'Allow',
-        Action: 'dynamodb:GetItem',
-        Resource: 'arn:aws:dynamodb:eu-west-1:874522027524:table/upis',
+        Action: [
+          'dynamodb:GetItem',
+          'dynamodb:Query',
+          'dynamodb:Scan'
+        ],
+        Resource: 'arn:aws:dynamodb:eu-west-1:874522027524:table/upis_users',
         Condition: {
           "ForAllValues:StringEquals": {
-              "dynamodb:LeadingKeys": [
-                `user/${uid}`
-              ]
+              "dynamodb:LeadingKeys": [uid]
           }
         }
       }
@@ -162,6 +215,7 @@ export type AwsCreds = {
 export type User = {
   uid: string,
   state: unknown,
-  bands: Record<string, unknown>
+  name: string,
+  bands: Record<string, string>
 }
 

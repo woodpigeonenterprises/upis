@@ -7,6 +7,7 @@ export type Session = {
 };
 
 export type User = {
+  uid: string
   name: string,
   bands: Map<string, string>
 }
