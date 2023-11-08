@@ -62,7 +62,7 @@ async function render(nextPage?: typeof page): Promise<void> {
 				console.log('Handling job', job);
 
 				//todo some kind of branching on job type
-				return Track.createJobHandler(store)(job);
+				return Track.createJobHandler({ store, jobs })(job);
 			})
 
 			// jobs.addJob('hello', { due: Date.now() + 10000 });

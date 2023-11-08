@@ -78,6 +78,10 @@ export async function createTrack(bid: string, tid: string) {
     Item: { key: { S: `track/${bid}/${tid}` } }
   }));
 
+  // if a track is created, we can find it via query based on band
+  // tracks should be queried in descending order
+  // given STS for particular band (should be an extended session)
+
   return 'BLAH';
 }
 

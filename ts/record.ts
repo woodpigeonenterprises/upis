@@ -155,9 +155,9 @@ export class Track implements PersistableTrack
     throw 'unimpl';
   }
 
-  static createJobHandler = (store: Store) => async (job: unknown) => {
+  static createJobHandler = (x: { store: Store, jobs: JobQueue }) => async (job: unknown) => {
     if(isPersistTrackJob(job)) {
-      const track = await store.loadTrack(job.track.id);
+      const track = await x.store.loadTrack(job.track.id);
       if(!track) {
         console.error(`failed to load track ${job.track.id}`)
         return true;
@@ -165,8 +165,6 @@ export class Track implements PersistableTrack
 
       switch(track.persistState.type) {
         case 'local':
-          console.log('PERSIST LOCAL')
-
           const bid = track.info.bandId;
 
           const r = await fetch(`http://localhost:9999/bands/${bid}/tracks`, {
@@ -181,18 +179,32 @@ export class Track implements PersistableTrack
             mode: 'cors'
           });
 
-          //contact api
-          //api will assign nice sequence number
-          //api will give us token to persist to certain addresses
+          if(!r.ok) {
+            console.warn(`Could not register track ${job.track.id}`)
+            return 10000;
+          }
 
-          //on response, track enters new state of Uploading (in which it will remain till we finalize the upload)
+          //expect STS token here for upload of blobs
 
+          const raw = await r.json();
+          const tid = raw.tid;
+          if(!tid || typeof tid !== 'string') {
+            throw `Bad tid ${tid} returned`;
+          }
 
-          
+          console.info(`Registered track ${job.track.id} as ${tid}`);
+
+          track.persistState = { type: 'uploading' };
+          await x.store.saveTrack(track);
+
+          await x.jobs.addJob({
+            type: 'persistTrack',
+            track: { id: track.info.id }
+          });
           break;
 
         case 'uploading':
-          console.log('PERSIST UPLOADING')
+          console.log('UPLOAD TRACK BLOBS HERE!')
           break;
       }
 
