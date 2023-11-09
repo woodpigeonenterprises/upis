@@ -2,7 +2,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { DynamoDBClient, GetItemCommand, QueryCommand, TransactWriteItemsCommand } from "@aws-sdk/client-dynamodb";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
-import { err } from "./util.js";
+import { err, timeOrderedId } from "./util.js";
 import { randomUUID } from "crypto";
 
 const creds = {
@@ -21,31 +21,28 @@ const dynamo = new DynamoDBClient({
 });
 
 const s3 = new S3Client({
-  region: 'eu-west-1',
+  region: 'eu-west-2',
   credentials: creds
 });
 
-export async function getTrackUploadUrl(bid: string, tid: string) {
+
+export async function proposeBlockUpload(bid: string, tid: string) {
+  const oid = timeOrderedId();
+  const key = `b/${bid}/t/${tid}/o/${oid}`;
+
   const cmd = new PutObjectCommand({
     Bucket: 'upis-data',
-    Key: '',
-    ContentLength: 1000
-    //...
+    Key: key,
+    ContentLength: 100000,
+    ContentType: 'audio/ogg'
   });
 
-  // we want to freely assign a block
-  // but at the same time associate it...
-  // so, in the granting of a right to write
-  // we create an id
-  // but given we know the bid and tid at this point,
-  // there is no benefit in _not_ constrining the block id
-  // again, the ids should be time-based for nice ordering purposes
-
-  // how to stop multiple people writing to the same track?
-  // can't lock really
-  //
-
-  return await getSignedUrl(s3, cmd, { expiresIn: 3600 });
+  return {
+    bid,
+    tid,
+    oid, 
+    uploadUrl: await getSignedUrl(s3, cmd, { expiresIn: 3600 })
+  } 
 }
 
 
@@ -273,4 +270,3 @@ export type User = {
   name: string,
   bands: Record<string, string>
 }
-

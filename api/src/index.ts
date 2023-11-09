@@ -4,7 +4,7 @@ import cors from "@koa/cors";
 import bodyparser from "koa-bodyparser";
 import jsonwebtoken from "jsonwebtoken";
 import { createPublicKey, createPrivateKey, JsonWebKey } from "crypto";
-import { userExists, getUserAwsCreds, createBand, loadUser, createTrack } from "./users.js";
+import { userExists, getUserAwsCreds, createBand, loadUser, createTrack, proposeBlockUpload } from "./users.js";
 import fs from "fs";
 import { err } from "./util.js";
 
@@ -105,7 +105,7 @@ router.put('/bands/:bid/tracks/:tid', async x => {
 });
 
 
-router.post('/bands/:bid/tracks/:tid/auth', async x => {
+router.post('/bands/:bid/tracks/:tid/blocks', async x => {
   const cookie = x.cookies.get('upis_user') || err('No cookie on request');
   const uid = (await verifyUpisJwt(cookie)) || err('Bad JWT');
 
@@ -119,15 +119,18 @@ router.post('/bands/:bid/tracks/:tid/auth', async x => {
     err(`User ${uid} is not a member of band ${bid}`);
   }
 
+  //!!!!!!!!!
   //todo we should have single per-band cookie
   //!!!!!!!!!
 
   const tid = x.params.tid || err('Missing tid');
   console.info('Got track id', tid);
 
+  //proposal of upload should include size and header!!!
+  const target = await proposeBlockUpload(bid, tid);
+
   x.body = {
-    prefix: 's3 prefix for writing blobs',
-    token: 'sts token for S3 - or signed url?'
+    ...target
   };
 
   x.status = 201;

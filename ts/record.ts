@@ -1,6 +1,6 @@
 import { JobQueue } from "./queue";
 import { Store } from "./store"
-import { delay } from "./util";
+import { delay, timeOrderedId } from "./util";
 import * as uuid from "uuid"
 
 export function isPlayable(v: unknown): v is Playable {
@@ -168,7 +168,7 @@ export class Track implements PersistableTrack
       }
 
       switch(track.persistState.type) {
-        case 'local':
+        case 'local': {
           const { bid, tid } = track.info;
 
           const r = await fetch(`http://localhost:9999/bands/${bid}/tracks/${tid}`, {
@@ -188,8 +188,6 @@ export class Track implements PersistableTrack
             return 10000;
           }
 
-          //expect STS token here for upload of blobs
-
           console.info(`Registered track ${job.track.tid} as ${tid}`);
 
           track.persistState = { type: 'uploading' };
@@ -200,10 +198,64 @@ export class Track implements PersistableTrack
             track: { bid: track.info.bid, tid: track.info.tid }
           });
           break;
+        }
 
-        case 'uploading':
-          console.log('UPLOAD TRACK BLOBS HERE!')
+        case 'uploading': {
+          const { bid, tid } = track.info; 
+
+          const r = await fetch(`http://localhost:9999/bands/${bid}/tracks/${tid}/blocks`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              //...
+            }),
+            credentials: 'include',
+            mode: 'cors'
+          });
+
+          if(!r.ok) {
+            console.warn(`Could not propose upload for track ${tid}`)
+            return 10000;
+          }
+
+          const body = await r.json();
+
+          console.info('Proposed upload, got response', body);
+
+          const uploadUrl = body.uploadUrl as string;
+
+
+          const req = new Request(uploadUrl);
+
+          const r3 = await fetch(req);
+
+          
+
+          const r2 = await fetch({
+            url: uploadUrl,
+            method: 'PUT',
+            headers: {
+              // 'Content-Type': 'audio/ogg',
+              // 'Content-Length': '1000'
+              //content length is auto-created, apparently
+            },
+            body: 'sfdskhfksjfhdskjfhds',
+            credentials: 'include',
+            mode: 'cors',
+          });
+
+          if(!r2.ok) {
+            console.warn(`Could not upload test block`)
+            return true;
+          }
+
+          //todo
+          //should also upload with Content-MD5 header to protect against corruption
+          
           break;
+        }
       }
 
       await delay(1000);
@@ -222,7 +274,7 @@ export class Track implements PersistableTrack
 
     const info: TrackInfo = {
       bid,
-      tid: ((Date.now() - Date.parse('2019-01-01')) * 24).toString(36), //could be even better, this - (random padding at end)
+      tid: timeOrderedId(),
       mimeType
     };
 
