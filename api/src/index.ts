@@ -4,7 +4,7 @@ import cors from "@koa/cors";
 import bodyparser from "koa-bodyparser";
 import jsonwebtoken from "jsonwebtoken";
 import { createPublicKey, createPrivateKey, JsonWebKey } from "crypto";
-import { userExists, getUserAwsCreds, createBand, loadUser, claimTrackId, createTrack } from "./users.js";
+import { userExists, getUserAwsCreds, createBand, loadUser, createTrack } from "./users.js";
 import fs from "fs";
 import { err } from "./util.js";
 
@@ -81,7 +81,7 @@ router.post('/band', async x => {
   x.status = 201;
 });
 
-router.post('/bands/:bid/tracks', async x => {
+router.put('/bands/:bid/tracks/:tid', async x => {
   const cookie = x.cookies.get('upis_user') || err('No cookie on request');
   const uid = (await verifyUpisJwt(cookie)) || err('Bad JWT');
 
@@ -90,17 +90,46 @@ router.post('/bands/:bid/tracks', async x => {
   const user = await loadUser(uid);
   if(!user) err('No suitable user found');
 
-  const bid = x.params.bid;
-  if(!bid || !user.bands[bid]) {
+  const bid = x.params.bid || err('Missing bid');
+  if(!user.bands[bid]) {
     err(`User ${uid} is not a member of band ${bid}`);
   }
 
-  const tid = await claimTrackId(bid);
+  const tid = x.params.tid || err('Missing tid');
   console.info('Got track id', tid);
 
-  const created = await createTrack(bid, tid);
+  await createTrack(bid, tid);
 
   x.body = { bid, tid };
+  x.status = 201;
+});
+
+
+router.post('/bands/:bid/tracks/:tid/auth', async x => {
+  const cookie = x.cookies.get('upis_user') || err('No cookie on request');
+  const uid = (await verifyUpisJwt(cookie)) || err('Bad JWT');
+
+  console.info('Loading user', uid);
+
+  const user = await loadUser(uid);
+  if(!user) err('No suitable user found');
+
+  const bid = x.params.bid || err('Missing bid');
+  if(!user.bands[bid]) {
+    err(`User ${uid} is not a member of band ${bid}`);
+  }
+
+  //todo we should have single per-band cookie
+  //!!!!!!!!!
+
+  const tid = x.params.tid || err('Missing tid');
+  console.info('Got track id', tid);
+
+  x.body = {
+    prefix: 's3 prefix for writing blobs',
+    token: 'sts token for S3 - or signed url?'
+  };
+
   x.status = 201;
 });
 

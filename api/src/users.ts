@@ -1,4 +1,6 @@
-import { DynamoDBClient, GetItemCommand, PutItemCommand, QueryCommand, TransactWriteItemsCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
+import { DynamoDBClient, GetItemCommand, QueryCommand, TransactWriteItemsCommand } from "@aws-sdk/client-dynamodb";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { err } from "./util.js";
 import { randomUUID } from "crypto";
@@ -17,6 +19,36 @@ const dynamo = new DynamoDBClient({
   region: 'eu-west-1',
   credentials: creds
 });
+
+const s3 = new S3Client({
+  region: 'eu-west-1',
+  credentials: creds
+});
+
+export async function getTrackUploadUrl(bid: string, tid: string) {
+  const cmd = new PutObjectCommand({
+    Bucket: 'upis-data',
+    Key: '',
+    ContentLength: 1000
+    //...
+  });
+
+  // we want to freely assign a block
+  // but at the same time associate it...
+  // so, in the granting of a right to write
+  // we create an id
+  // but given we know the bid and tid at this point,
+  // there is no benefit in _not_ constrining the block id
+  // again, the ids should be time-based for nice ordering purposes
+
+  // how to stop multiple people writing to the same track?
+  // can't lock really
+  //
+
+  return await getSignedUrl(s3, cmd, { expiresIn: 3600 });
+}
+
+
 
 export async function createBand(user: User, bandName: string) {
   const bid = randomUUID();
@@ -71,38 +103,61 @@ export async function createBand(user: User, bandName: string) {
   console.log(r);
 }
 
-//wouldn't have to claim if we went for time-based UUIDs here instead...
-//would save db interaction
-export async function claimTrackId(bid: string): Promise<string> {
-  const r = await dynamo.send(new UpdateItemCommand({
-    TableName: 'upis_bands',
-    Key: { bid: { S: bid }, sort: { S: 'band' } },
-    UpdateExpression: 'SET nextTrackId = nextTrackId + :inc',
-    ExpressionAttributeValues: {
-      ':inc': { N: '1' }
-    },
-    ReturnValues: 'UPDATED_OLD'
-  }));
+// //wouldn't have to claim if we went for time-based UUIDs here instead...
+// //would save db interaction
+// export async function claimTrackId(bid: string): Promise<string> {
+//   const r = await dynamo.send(new UpdateItemCommand({
+//     TableName: 'upis_bands',
+//     Key: { bid: { S: bid }, sort: { S: 'band' } },
+//     UpdateExpression: 'SET nextTrackId = nextTrackId + :inc',
+//     ExpressionAttributeValues: {
+//       ':inc': { N: '1' }
+//     },
+//     ReturnValues: 'UPDATED_OLD'
+//   }));
 
-  const claimed = r.Attributes?.nextTrackId?.N;
-  if(!claimed) throw 'Claimed number not returned';
+//   const claimed = r.Attributes?.nextTrackId?.N;
+//   if(!claimed) throw 'Claimed number not returned';
 
-  return claimed;
-}
+//   return claimed;
+// }
 
 export async function createTrack(bid: string, tid: string) {
-  const r = await dynamo.send(new PutItemCommand({
-    TableName: 'upis',
-    Item: { key: { S: `track/${bid}/${tid}` } }
+  const r = await dynamo.send(new TransactWriteItemsCommand({
+    TransactItems: [
+      {
+        Put: {
+          TableName: 'upis_tracks',
+          Item: {
+            'bid:tid': { S: `${bid}:${tid}` },
+            sort: { S: 'track' },
+            v: { N: '0' }
+          }
+        }
+      },
+      {
+        Put: {
+          TableName: 'upis_bands',
+          Item: {
+            bid: { S: bid },
+            sort: { S: `track/${tid}` },
+          }
+        }
+      },
+      {
+        Update: {
+          TableName: 'upis_bands',
+          Key: { bid: { S: bid }, sort: { S: 'band' } },
+          UpdateExpression: 'SET v = v + :inc',
+          ExpressionAttributeValues: {
+            ':inc': { N: '1' }
+          }
+        }
+      }
+    ]
   }));
 
-  //todo create band/track records above
-
-  // if a track is created, we can find it via query based on band
-  // tracks should be queried in descending order
-  // given STS for particular band (should be an extended session)
-
-  return 'BLAH';
+  return [bid, tid];
 }
 
 

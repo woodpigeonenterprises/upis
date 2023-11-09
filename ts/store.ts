@@ -7,7 +7,7 @@ type BlobSaver = (id: BlobId, blob: Blob) => Promise<BlobId>;
 export type Store = {
   saveBlob: BlobSaver
   saveTrack(track: PersistableTrack): Promise<void>
-  loadTrack(trackId: string): Promise<PersistableTrack|false>
+  loadTrack(bid: string, tid: string): Promise<PersistableTrack|false>
 };
 
 export async function openStore(name: string): Promise<Store> {
@@ -18,10 +18,7 @@ export async function openStore(name: string): Promise<Store> {
       switch(`${oldVersion} -> ${newVersion}`) {
         case '0 -> 1':
           db.createObjectStore('blobs', { keyPath: ['stream', 'idx'] });
-
-          db.createObjectStore('tracks', { keyPath: ['info.id'] })
-              .createIndex('byBand', ['info.bandId', 'date', 'info.id']);
-
+          db.createObjectStore('tracks', { keyPath: ['info.bid', 'info.tid'] });
           break;
       }
     }
@@ -49,10 +46,10 @@ export async function openStore(name: string): Promise<Store> {
       });
     },
 
-    async loadTrack(id: string): Promise<PersistableTrack|false> {
-      console.log('LOADING TRACK', id);
+    async loadTrack(bid: string, tid: string): Promise<PersistableTrack|false> {
+      console.log('LOADING TRACK', bid, tid);
       
-      const track = await db.get('tracks', [id]);
+      const track = await db.get('tracks', [bid, tid]);
       if(!track) return false;
 
       if(isPersistedTrack(track)) {

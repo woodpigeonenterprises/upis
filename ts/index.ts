@@ -147,7 +147,7 @@ async function render(nextPage?: typeof page): Promise<void> {
 
       for(const { info, state } of tracks) {
         const li = document.createElement('li');
-        li.innerHTML = info.id;
+        li.innerHTML = info.tid;
 
         if(isPlayable(state)) {
           const b = document.createElement('input');

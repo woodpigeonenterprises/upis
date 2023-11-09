@@ -1,6 +1,7 @@
 import { JobQueue } from "./queue";
 import { Store } from "./store"
 import { delay } from "./util";
+import * as uuid from "uuid"
 
 export function isPlayable(v: unknown): v is Playable {
   const p = (<any>v).play;
@@ -25,7 +26,7 @@ export class Recording {
   start(): Promise<void> {
     return new Promise<void>(resolve => {
       this.recorder.onstart = () => {
-        console.log('Recording', this.track.info.id, 'started')
+        console.log('Recording', this.track.info.tid, 'started')
         resolve();
       };
 
@@ -35,7 +36,7 @@ export class Recording {
       };
 
       this.recorder.onstop = async e => {
-        console.log('Recording', this.track.info.id, 'complete of', this.parts.length, 'blob parts');
+        console.log('Recording', this.track.info.tid, 'complete of', this.parts.length, 'blob parts');
         this.complete();
       };
 
@@ -48,7 +49,7 @@ export class Recording {
   }
 
   private async pushBlob(blob: Blob) {
-    const blobId = { stream: this.track.info.id, idx: this._nextBlobId++ };
+    const blobId = { stream: this.track.info.tid, idx: this._nextBlobId++ };
     
     this.parts.push(blob);
 
@@ -63,7 +64,7 @@ export class Recording {
 
     await this.track.jobs.addJob({
       type: 'persistTrack',
-      track: { id: this.track.info.id }
+      track: { bid: this.track.info.bid, tid: this.track.info.tid }
     });
   }
 
@@ -157,49 +158,46 @@ export class Track implements PersistableTrack
 
   static createJobHandler = (x: { store: Store, jobs: JobQueue }) => async (job: unknown) => {
     if(isPersistTrackJob(job)) {
-      const track = await x.store.loadTrack(job.track.id);
+
+      console.info('about to load track with job', job)
+      
+      const track = await x.store.loadTrack(job.track.bid, job.track.tid);
       if(!track) {
-        console.error(`failed to load track ${job.track.id}`)
+        console.error(`failed to load track ${job.track.tid}`)
         return true;
       }
 
       switch(track.persistState.type) {
         case 'local':
-          const bid = track.info.bandId;
+          const { bid, tid } = track.info;
 
-          const r = await fetch(`http://localhost:9999/bands/${bid}/tracks`, {
-            method: 'POST',
+          const r = await fetch(`http://localhost:9999/bands/${bid}/tracks/${tid}`, {
+            method: 'PUT',
             headers: {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              name: 'HELLO!'
+              //...
             }),
             credentials: 'include',
             mode: 'cors'
           });
 
           if(!r.ok) {
-            console.warn(`Could not register track ${job.track.id}`)
+            console.warn(`Could not register track ${job.track.tid}`)
             return 10000;
           }
 
           //expect STS token here for upload of blobs
 
-          const raw = await r.json();
-          const tid = raw.tid;
-          if(!tid || typeof tid !== 'string') {
-            throw `Bad tid ${tid} returned`;
-          }
-
-          console.info(`Registered track ${job.track.id} as ${tid}`);
+          console.info(`Registered track ${job.track.tid} as ${tid}`);
 
           track.persistState = { type: 'uploading' };
           await x.store.saveTrack(track);
 
           await x.jobs.addJob({
             type: 'persistTrack',
-            track: { id: track.info.id }
+            track: { bid: track.info.bid, tid: track.info.tid }
           });
           break;
 
@@ -215,7 +213,7 @@ export class Track implements PersistableTrack
     return false;
   };
 
-  static async record(bandId: string, store: Store, jobs: JobQueue): Promise<Track> {
+  static async record(bid: string, store: Store, jobs: JobQueue): Promise<Track> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const mimeType = 'audio/ogg;codecs=opus'
@@ -223,8 +221,8 @@ export class Track implements PersistableTrack
     const recorder = new MediaRecorder(stream, { mimeType });
 
     const info: TrackInfo = {
-      bandId,
-      id: crypto.randomUUID(),
+      bid,
+      tid: ((Date.now() - Date.parse('2019-01-01')) * 24).toString(36), //could be even better, this - (random padding at end)
       mimeType
     };
 
@@ -252,8 +250,8 @@ export class Track implements PersistableTrack
 }
 
 export interface TrackInfo {
-  bandId: string,
-  id: string
+  bid: string,
+  tid: string
   mimeType: string
 }
 
@@ -270,7 +268,7 @@ interface TrackContext {
 
 type PersistTrackJob = {
   type: 'persistTrack',
-  track: { id: string }
+  track: { bid: string, tid: string }
 }
 
 function isPersistTrackJob(v: unknown): v is PersistTrackJob {
@@ -292,8 +290,8 @@ export function isPersistedTrack(v: any): v is PersistableTrack {
 
 function isTrackInfo(v: any): v is TrackInfo {
   return !!v
-      && typeof v.bandId === 'string'
-      && typeof v.id === 'string';
+      && typeof v.bid === 'string'
+      && typeof v.tid === 'string';
       // && typeof v.mimeType === 'string';
 }
 
