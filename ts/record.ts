@@ -1,7 +1,7 @@
 import { JobQueue } from "./queue";
 import { Store } from "./store"
 import { delay, timeOrderedId } from "./util";
-import * as uuid from "uuid"
+import * as SparkMD5 from "spark-md5";
 
 export function isPlayable(v: unknown): v is Playable {
   const p = (<any>v).play;
@@ -203,13 +203,23 @@ export class Track implements PersistableTrack
         case 'uploading': {
           const { bid, tid } = track.info; 
 
+          // so where are these blobs then???
+          // they get plonked into the db, obviously
+          // and so when we run here, we should gather the still-to-upload blobs
+          // this means a last-uploaded cursor must be included in the persistable track state
+
+          const buff = new Blob(['woofwoofwoof'], {type: 'application/text'});
+          const buffHash = btoa(SparkMD5.ArrayBuffer.hash(await buff.arrayBuffer(), true));
+
           const r = await fetch(`http://localhost:9999/bands/${bid}/tracks/${tid}/blocks`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              //...
+              size: buff.size,
+              mimeType: buff.type,
+              hash: buffHash
             }),
             credentials: 'include',
             mode: 'cors'
@@ -226,22 +236,12 @@ export class Track implements PersistableTrack
 
           const uploadUrl = body.uploadUrl as string;
 
-
-          const req = new Request(uploadUrl);
-
-          const r3 = await fetch(req);
-
-          
-
-          const r2 = await fetch({
-            url: uploadUrl,
+          const r2 = await fetch(uploadUrl, {
             method: 'PUT',
             headers: {
-              // 'Content-Type': 'audio/ogg',
-              // 'Content-Length': '1000'
-              //content length is auto-created, apparently
+              'Content-MD5': buffHash 
             },
-            body: 'sfdskhfksjfhdskjfhds',
+            body: buff,
             credentials: 'include',
             mode: 'cors',
           });
@@ -250,9 +250,6 @@ export class Track implements PersistableTrack
             console.warn(`Could not upload test block`)
             return true;
           }
-
-          //todo
-          //should also upload with Content-MD5 header to protect against corruption
           
           break;
         }

@@ -26,15 +26,16 @@ const s3 = new S3Client({
 });
 
 
-export async function proposeBlockUpload(bid: string, tid: string) {
+export async function proposeBlockUpload(bid: string, tid: string, proposal: UploadProposal) {
   const oid = timeOrderedId();
   const key = `b/${bid}/t/${tid}/o/${oid}`;
 
   const cmd = new PutObjectCommand({
     Bucket: 'upis-data',
     Key: key,
-    ContentLength: 100000,
-    ContentType: 'audio/ogg'
+    ContentLength: proposal.size,
+    ContentMD5: proposal.hash,
+    ContentType: proposal.mimeType
   });
 
   return {
@@ -45,6 +46,17 @@ export async function proposeBlockUpload(bid: string, tid: string) {
   } 
 }
 
+export function isUploadProposal(v: any): v is UploadProposal {
+  return typeof v.size === 'number'
+    && typeof v.hash === 'string'
+    && typeof v.mimeType === 'string';
+}
+
+export type UploadProposal = {
+  size: number,
+  hash: string,
+  mimeType: string
+}
 
 
 export async function createBand(user: User, bandName: string) {

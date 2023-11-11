@@ -4,7 +4,7 @@ import cors from "@koa/cors";
 import bodyparser from "koa-bodyparser";
 import jsonwebtoken from "jsonwebtoken";
 import { createPublicKey, createPrivateKey, JsonWebKey } from "crypto";
-import { userExists, getUserAwsCreds, createBand, loadUser, createTrack, proposeBlockUpload } from "./users.js";
+import { userExists, getUserAwsCreds, createBand, loadUser, createTrack, proposeBlockUpload, isUploadProposal } from "./users.js";
 import fs from "fs";
 import { err } from "./util.js";
 
@@ -126,8 +126,11 @@ router.post('/bands/:bid/tracks/:tid/blocks', async x => {
   const tid = x.params.tid || err('Missing tid');
   console.info('Got track id', tid);
 
+  const proposal = isUploadProposal(x.request.body) ? x.request.body : err('Bad upload proposal');
+
   //proposal of upload should include size and header!!!
-  const target = await proposeBlockUpload(bid, tid);
+  const target = await proposeBlockUpload(bid, tid, proposal);
+
 
   x.body = {
     ...target

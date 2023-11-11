@@ -11,6 +11,7 @@
     "@aws-sdk/s3-request-presigner": "^3.445.0",
     "@types/google-one-tap": "^1.2.4",
     "@types/google.accounts": "^0.0.13",
+    "@types/spark-md5": "^3.0.4",
     "@types/uuid": "^9.0.7",
     "html-webpack-plugin": "^5.5.3",
     "ts-loader": "^9.5.0",
@@ -24,6 +25,7 @@
     "@aws-sdk/client-s3": "^3.431.0",
     "@aws-sdk/client-sts": "^3.431.0",
     "idb": "^7.1.1",
+    "spark-md5": "^3.0.2",
     "uuid": "^9.0.1"
   }
 }
