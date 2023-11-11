@@ -1,11 +1,16 @@
 import { openDB } from "idb";
 import { PersistableTrack, isPersistedTrack } from "./record";
 
-type BlobId = { stream: string, idx: number };
+export type StreamId = string;
+export type StreamBlob = { cursor: StreamCursor, blob: Blob }
+export type StreamCursor = { stream: StreamId, idx: number };
+export type BlobId = StreamCursor;
+
 type BlobSaver = (id: BlobId, blob: Blob) => Promise<BlobId>;
 
 export type Store = {
   saveBlob: BlobSaver
+  readBlobs(cursor: StreamCursor): Promise<StreamBlob[]>
   saveTrack(track: PersistableTrack): Promise<void>
   loadTrack(bid: string, tid: string): Promise<PersistableTrack|false>
 };
@@ -36,6 +41,20 @@ export async function openStore(name: string): Promise<Store> {
       await db.put('blobs', { stream: id.stream, idx: id.idx, blob });
       console.log('saved blob', id);
       return id;
+    },
+
+    async readBlobs(cursor: StreamCursor): Promise<StreamBlob[]> {
+      const found = await db.getAll('blobs', IDBKeyRange.lowerBound([cursor.stream, cursor.idx]), 1); //todo read more than one!
+
+      return found.flatMap(v => {
+        return <StreamBlob>{ //todo proper typing here
+          blob: v.blob as Blob,
+          cursor: {
+            stream: v.stream as string,
+            idx: v.idx as number
+          }
+        }
+      });
     },
 
     async saveTrack(track: PersistableTrack): Promise<void> {

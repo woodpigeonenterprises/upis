@@ -2,7 +2,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { DynamoDBClient, GetItemCommand, QueryCommand, TransactWriteItemsCommand } from "@aws-sdk/client-dynamodb";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
-import { err, timeOrderedId } from "./util.js";
+import { err } from "./util.js";
 import { randomUUID } from "crypto";
 
 const creds = {
@@ -26,9 +26,10 @@ const s3 = new S3Client({
 });
 
 
-export async function proposeBlockUpload(bid: string, tid: string, proposal: UploadProposal) {
-  const oid = timeOrderedId();
+export async function proposeBlockUpload(bid: string, tid: string, oid: string, proposal: UploadProposal) {
   const key = `b/${bid}/t/${tid}/o/${oid}`;
+
+  //todo is oid beyond track cursor???
 
   const cmd = new PutObjectCommand({
     Bucket: 'upis-data',

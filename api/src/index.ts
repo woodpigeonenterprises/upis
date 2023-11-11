@@ -105,32 +105,33 @@ router.put('/bands/:bid/tracks/:tid', async x => {
 });
 
 
-router.post('/bands/:bid/tracks/:tid/blocks', async x => {
+router.put('/bands/:bid/tracks/:tid/blocks/:oid', async x => {
   const cookie = x.cookies.get('upis_user') || err('No cookie on request');
   const uid = (await verifyUpisJwt(cookie)) || err('Bad JWT');
-
-  console.info('Loading user', uid);
 
   const user = await loadUser(uid);
   if(!user) err('No suitable user found');
 
   const bid = x.params.bid || err('Missing bid');
+  const tid = x.params.tid || err('Missing tid');
+  const oid = x.params.oid || err('Missing block oid');
+
   if(!user.bands[bid]) {
     err(`User ${uid} is not a member of band ${bid}`);
   }
+
+  const proposal = isUploadProposal(x.request.body) ? x.request.body : err('Bad upload proposal');
 
   //!!!!!!!!!
   //todo we should have single per-band cookie
   //!!!!!!!!!
 
-  const tid = x.params.tid || err('Missing tid');
-  console.info('Got track id', tid);
+  //should check that oid is past current cursor todo
+  //we need to use oid then to write todo
 
-  const proposal = isUploadProposal(x.request.body) ? x.request.body : err('Bad upload proposal');
 
   //proposal of upload should include size and header!!!
-  const target = await proposeBlockUpload(bid, tid, proposal);
-
+  const target = await proposeBlockUpload(bid, tid, oid, proposal);
 
   x.body = {
     ...target

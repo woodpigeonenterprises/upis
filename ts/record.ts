@@ -1,7 +1,7 @@
 import { JobQueue } from "./queue";
-import { Store } from "./store"
-import { delay, timeOrderedId } from "./util";
-import * as SparkMD5 from "spark-md5";
+import { Store, StreamCursor } from "./store"
+import { timeOrderedId } from "./util";
+import SparkMD5 from "spark-md5";
 
 export function isPlayable(v: unknown): v is Playable {
   const p = (<any>v).play;
@@ -40,7 +40,7 @@ export class Recording {
         this.complete();
       };
 
-      this.recorder.start(300);
+      this.recorder.start(5000);
     });
   }
 
@@ -123,7 +123,8 @@ type Local = {
 }
 
 type Uploading = {
-  type: 'uploading'
+  type: 'uploading',
+  cursor: StreamCursor
 }
 
 type Uploaded = {
@@ -131,7 +132,6 @@ type Uploaded = {
 }
 
 export type TrackPersistState = Local|Uploading|Uploaded;
-
 
 export class Track implements PersistableTrack
 {
@@ -152,114 +152,115 @@ export class Track implements PersistableTrack
     if(this.onchange) this.onchange(this);
   }
 
-  private sinkPersistState(state: TrackPersistState) {
-    throw 'unimpl';
-  }
-
   static createJobHandler = (x: { store: Store, jobs: JobQueue }) => async (job: unknown) => {
-    if(isPersistTrackJob(job)) {
+    if(!isPersistTrackJob(job)) return false;
 
-      console.info('about to load track with job', job)
-      
-      const track = await x.store.loadTrack(job.track.bid, job.track.tid);
-      if(!track) {
-        console.error(`failed to load track ${job.track.tid}`)
-        return true;
-      }
+    return await navigator.locks
+      .request(trackLockKey(job.track), async () => {
 
-      switch(track.persistState.type) {
-        case 'local': {
-          const { bid, tid } = track.info;
+        console.info('about to load track with job', job)
 
-          const r = await fetch(`http://localhost:9999/bands/${bid}/tracks/${tid}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              //...
-            }),
-            credentials: 'include',
-            mode: 'cors'
-          });
-
-          if(!r.ok) {
-            console.warn(`Could not register track ${job.track.tid}`)
-            return 10000;
-          }
-
-          console.info(`Registered track ${job.track.tid} as ${tid}`);
-
-          track.persistState = { type: 'uploading' };
-          await x.store.saveTrack(track);
-
-          await x.jobs.addJob({
-            type: 'persistTrack',
-            track: { bid: track.info.bid, tid: track.info.tid }
-          });
-          break;
+        const track = await x.store.loadTrack(job.track.bid, job.track.tid);
+        if(!track) {
+          console.error(`failed to load track ${job.track.tid}`)
+          return true;
         }
 
-        case 'uploading': {
-          const { bid, tid } = track.info; 
+        switch(track.persistState.type) {
+          case 'local': {
+            const { bid, tid } = track.info;
 
-          // so where are these blobs then???
-          // they get plonked into the db, obviously
-          // and so when we run here, we should gather the still-to-upload blobs
-          // this means a last-uploaded cursor must be included in the persistable track state
+            const r = await fetch(`http://localhost:9999/bands/${bid}/tracks/${tid}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                //...
+              }),
+              credentials: 'include',
+              mode: 'cors'
+            });
 
-          const buff = new Blob(['woofwoofwoof'], {type: 'application/text'});
-          const buffHash = btoa(SparkMD5.ArrayBuffer.hash(await buff.arrayBuffer(), true));
+            if(!r.ok) {
+              console.warn(`Could not register track ${job.track.tid}`)
+              return 10000;
+            }
 
-          const r = await fetch(`http://localhost:9999/bands/${bid}/tracks/${tid}/blocks`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              size: buff.size,
-              mimeType: buff.type,
-              hash: buffHash
-            }),
-            credentials: 'include',
-            mode: 'cors'
-          });
+            console.info(`Registered track ${job.track.tid} as ${tid}`);
 
-          if(!r.ok) {
-            console.warn(`Could not propose upload for track ${tid}`)
-            return 10000;
+            track.persistState = { type: 'uploading', cursor: { stream: tid, idx: 0 } };
+            await x.store.saveTrack(track);
+
+            await x.jobs.addJob({
+              type: 'persistTrack',
+              track: { bid: track.info.bid, tid: track.info.tid }
+            });
+            break;
           }
 
-          const body = await r.json();
+          case 'uploading': {
+            const { bid, tid } = track.info; 
 
-          console.info('Proposed upload, got response', body);
+            const found = await x.store.readBlobs(track.persistState.cursor);
+            if(!found.length) return true;
 
-          const uploadUrl = body.uploadUrl as string;
+            const { blob, cursor } = found[0]; //todo save all together, poss via clumping
 
-          const r2 = await fetch(uploadUrl, {
-            method: 'PUT',
-            headers: {
-              'Content-MD5': buffHash 
-            },
-            body: buff,
-            credentials: 'include',
-            mode: 'cors',
-          });
+            const hash = btoa(SparkMD5.ArrayBuffer.hash(await blob.arrayBuffer(), true));
 
-          if(!r2.ok) {
-            console.warn(`Could not upload test block`)
+            const oid = cursor.idx.toString();
+
+            const r = await fetch(`http://localhost:9999/bands/${bid}/tracks/${tid}/blocks/${oid}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                size: blob.size,
+                mimeType: blob.type,
+                hash: hash
+              }),
+              credentials: 'include',
+              mode: 'cors'
+            });
+
+            if(!r.ok) {
+              console.warn(`Could not propose upload for track ${tid}`)
+              return 10000;
+            }
+
+            const body = await r.json();
+
+            console.info('Proposed upload, got response', body);
+
+            //todo should read bytes allowed
+            //and trim blob accordingly
+
+            const uploadUrl = body.uploadUrl as string;
+
+            const r2 = await fetch(uploadUrl, {
+              method: 'PUT',
+              headers: {
+                'Content-MD5': hash 
+              },
+              body: blob,
+              credentials: 'include',
+              mode: 'cors',
+            });
+
+            if(!r2.ok) {
+              console.warn(`Could not upload test block`)
+              return 10000;
+            }
+
+            track.persistState = { type: 'uploading', cursor: { stream: cursor.stream, idx: cursor.idx + 1 } };
+            await x.store.saveTrack(track);
+
             return true;
           }
-          
-          break;
         }
-      }
-
-      await delay(1000);
-      return true;
-    }
-
-    return false;
+      });
   };
 
   static async record(bid: string, store: Store, jobs: JobQueue): Promise<Track> {
@@ -298,9 +299,12 @@ export class Track implements PersistableTrack
   }
 }
 
-export interface TrackInfo {
+export interface TrackId {
   bid: string,
   tid: string
+}
+
+export interface TrackInfo extends TrackId {
   mimeType: string
 }
 
@@ -310,20 +314,35 @@ interface TrackContext {
   store: Store
   jobs: JobQueue
   persistable(): PersistableTrack
-  
 }
 
+
+function trackLockKey(info: TrackId) {
+  return `upis_track_${info.tid}`;
+}
 
 
 type PersistTrackJob = {
   type: 'persistTrack',
-  track: { bid: string, tid: string }
+  track: TrackId
 }
 
-function isPersistTrackJob(v: unknown): v is PersistTrackJob {
-  return (<any>v).type == 'persistTrack';
+function isPersistTrackJob(v: any): v is PersistTrackJob {
+  return !!v
+      && v.type == 'persistTrack'
+      && isTrackId(v.track);
 }
 
+function isTrackId(v: any): v is TrackId {
+  return !!v
+      && typeof v.bid === 'string'
+      && typeof v.tid === 'string';
+}
+
+function isTrackInfo(v: any): v is TrackInfo {
+  return typeof v.mimeType === 'string'
+      && isTrackId(v);
+}
 
 
 
@@ -333,15 +352,9 @@ export interface PersistableTrack {
 }
 
 export function isPersistedTrack(v: any): v is PersistableTrack {
-  return isTrackInfo(v.info)
-      && isTrackPersistState(v.persistState);
-}
-
-function isTrackInfo(v: any): v is TrackInfo {
   return !!v
-      && typeof v.bid === 'string'
-      && typeof v.tid === 'string';
-      // && typeof v.mimeType === 'string';
+      && isTrackInfo(v.info)
+      && isTrackPersistState(v.persistState);
 }
 
 function isTrackPersistState(v: any): v is TrackPersistState {
