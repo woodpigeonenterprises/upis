@@ -199,8 +199,12 @@ async function render(nextPage?: typeof page): Promise<void> {
     logoutButton.value = 'Log out';
     logoutButton.onclick = () => render('logout');
 
+    const timeSpan = document.createElement('span');
+    setInterval(() => timeSpan.innerHTML = Date.now().toString(), 1000);
+
     divTop.appendChild(nameSpan);
     divTop.appendChild(logoutButton);
+    divTop.appendChild(timeSpan);
   }
 }
 
@@ -293,8 +297,6 @@ async function loadUser(dynamo: DynamoDBClient, uid: string): Promise<User|false
         ':uid': { S: uid }
       }
     }));
-
-    console.log('Got', r.Items);
 
     const items = r.Items;
     if(!items) return false;

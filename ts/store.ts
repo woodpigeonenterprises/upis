@@ -34,7 +34,6 @@ export async function openStore(name: string): Promise<Store> {
 
 
   const all = await db.getAll('blobs');
-  console.log('BLOBS', all);
 
   return {
     async saveBlob(id: BlobId, blob: Blob) {

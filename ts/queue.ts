@@ -83,7 +83,7 @@ export async function runJobQueue(name: string, handler: JobHandler): Promise<Jo
             await db.put('jobs', { ...i, due: Date.now() + result });
           }
           else {
-            console.warn(`Handler refuses job ${job}`);
+            console.warn('Handler refuses job', job);
           }
         }));
       }
