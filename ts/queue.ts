@@ -90,15 +90,8 @@ export async function runJobQueue(name: string, handler: JobHandler): Promise<Jo
       else {
         await delay(interval);
       }
-
-      // wot about locking?
-      // TODO use WebLock API to lock !!!!!
-      // (we did https especially for this!)
     }
   }
   
 }
-
-
-
 

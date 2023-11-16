@@ -319,6 +319,25 @@ export class Track implements PersistableTrack
 
   };
 
+  static init(info: TrackInfo, store: Store, jobs: JobQueue, stateFac: (x:TrackContext)=>[State,TrackPersistState]): Track {
+    let track: Track;
+
+    const context: TrackContext = {
+      info,
+      sink: s => track.sink(s),
+      store,
+      jobs,
+      persistable(): PersistableTrack
+      {
+        return track;
+      }
+    };
+
+    const [state, persistState] = stateFac(context);
+
+    return new Track(info, state, persistState);
+  }
+
   static async record(bid: string, store: Store, jobs: JobQueue): Promise<Track> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 

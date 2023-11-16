@@ -4,7 +4,7 @@ import { isPlayable, Track } from "./record";
 import { Store, openStore } from "./store"
 import { Band, Session, User } from "./model";
 import { JobQueue, runJobQueue } from "./queue";
-import { delay } from "./util";
+import TrackRepo from "./TrackRepo"
 
 let audio: AudioContext|undefined;
 
@@ -16,7 +16,7 @@ let jobs: JobQueue;
 
 let user: User;
 let band: Band;
-let tracks: Track[] = [];
+let tracks: TrackRepo;
 
 const serverUrl = "http://localhost:9999";
 const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.googleusercontent.com';
@@ -65,7 +65,7 @@ async function render(nextPage?: typeof page): Promise<void> {
 				return Track.createJobHandler({ store, jobs })(job);
 			})
 
-			// jobs.addJob('hello', { due: Date.now() + 10000 });
+      tracks = new TrackRepo(store);
 
       const dynamo = new DynamoDBClient({
         region: 'eu-west-1',
@@ -138,6 +138,8 @@ async function render(nextPage?: typeof page): Promise<void> {
       break;
 
     case 'band':
+      tracks.setBand(band.bid, () => render());
+
       renderTopBar();
 
       const header = document.createElement('h1');
@@ -145,7 +147,7 @@ async function render(nextPage?: typeof page): Promise<void> {
       
       const recordingsUl = document.createElement('ul');
 
-      for(const { info, state } of tracks) {
+      for(const { info, state } of tracks.list()) {
         const li = document.createElement('li');
         li.innerHTML = info.tid;
 
@@ -178,7 +180,7 @@ async function render(nextPage?: typeof page): Promise<void> {
       button.onclick = async () => {
         const track = await Track.record(band.bid, store, jobs);
         track.onchange = () => render();
-        tracks.push(track);
+        tracks.add(track);
 
         await render();
       };
