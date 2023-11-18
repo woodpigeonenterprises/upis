@@ -5,7 +5,7 @@ import { Store, openStore } from "./store"
 import { Band, Session, User } from "./model";
 import { JobQueue, runJobQueue } from "./queue";
 import TrackRepo from "./TrackRepo"
-import { BehaviorSubject, EMPTY, Observable, concatMap, empty, expand, from, fromEventPattern, reduce, throwError, withLatestFrom } from "rxjs";
+import { EMPTY, Observable, Subject, combineLatest, concatMap, connectable, expand, from, interval, map, startWith, take, takeUntil, tap, throwError } from "rxjs";
 
 let audio: AudioContext|undefined;
 
@@ -25,23 +25,39 @@ const googleAuthClientId = '633074721949-f7btgv29kucgh6m10av4td9bi88n903d.apps.g
 
 type PageType = string;
 
+type Slice = {
+  page?: PageType,
+  mainDiv?: HTMLElement,
+  topDiv?: HTMLElement
+};
 
-const page$ = new BehaviorSubject<PageType>('resume');
+const page$ = new Subject<PageType>();
 
+const slice$ = connectable(page$.pipe(
+  startWith('resume'),
+  
+  map(p => <Slice>{ page: p }),
+  
+  expand(
+    (m: Slice) => m.page ? renderPage(m.page) : EMPTY//,
+    // 1   
+  )
+));
 
-
-//todo throttle to 1
-const topDiv$ = from([document.createElement('div') as HTMLElement]);
-
-const mainDiv$ = page$.pipe(
-  expand(m => 
-    typeof m === 'string' ? renderPage(m) : EMPTY
-  ),
-
-  concatMap(m =>
-    typeof m !== 'string' ? [m] : EMPTY
-    )
+const newPage$ = slice$.pipe(
+  concatMap(m => m.page ? [m.page] : EMPTY),
+  tap(p => console.info('PAGE', p))
 );
+
+const mainDiv$ = slice$.pipe(
+  concatMap(m => m.mainDiv ? [m.mainDiv] : EMPTY)
+);
+
+const topDiv$ = slice$.pipe(
+  concatMap(m => m.topDiv ? [m.topDiv] : EMPTY)
+);
+
+slice$.connect();
 
 
 window.onload = async () => {
@@ -63,7 +79,7 @@ window.onload = async () => {
 
 
 
-function renderPage(page: PageType): Observable<HTMLElement|PageType> {
+function renderPage(page: PageType): Observable<Slice> {
   switch(page) {
     case 'login': return renderLogin();
     case 'logout': return renderLogout();
@@ -74,29 +90,29 @@ function renderPage(page: PageType): Observable<HTMLElement|PageType> {
   }
 }
   
-function renderLogin(): Observable<PageType> {
+function renderLogin(): Observable<Slice> {
   return from((async _ => {
     const googleToken = await getGoogleToken();
 
     session = await createSession('google', googleToken);
     saveSession(session);
 
-    return 'resume';
+    return { page: 'resume' };
   })());
 }
 
-function renderLogout(): Observable<PageType> {
+function renderLogout(): Observable<Slice> {
   return from((async _ => {
     clearSession();
-    return 'login';
+    return { page: 'login' };
   })());
 }
 
-function renderResume(): Observable<PageType> {
+function renderResume(): Observable<Slice> {
   return from((async _ => {
     const summoned = trySummonSession();
     if(!summoned) {
-      return 'login';
+      return { page: 'login' };
     }
 
     session = summoned;
@@ -119,319 +135,154 @@ function renderResume(): Observable<PageType> {
 
     const loaded = await loadUser(dynamo, uid);
     if(!loaded) {
-      return 'logout';
+      return { page: 'logout' };
     }
 
     user = loaded;
-    return 'user';
+    return { page: 'user' };
   })());
 }
 
-function renderUser(): Observable<PageType|HTMLElement> {
-    // renderTopBar();
-      
-  const bandsDiv = document.createElement('div');
-  const ul = document.createElement('ul');
+function renderUser(): Observable<Slice> {
+  return combineLatest([
+    renderTopBar(),
 
-  for(let [bid, bn] of user.bands.entries()) {
-    const li = document.createElement('li');
+    from((async () => {
+      const bandsDiv = document.createElement('div');
+      const ul = document.createElement('ul');
 
-    const a = document.createElement('a');
-    a.href = '#';
-    a.onclick = async () => {
-      band = {
-        bid,
-        name: bn
-      }
-      page$.next('band');
-    };
-    a.innerText = bn;
-    li.appendChild(a);
-
-    ul.appendChild(li);
-  };
-
-  bandsDiv.appendChild(ul);
-
-  const bandNameInput = document.createElement('input');
-  bandNameInput.type = 'text';
-  bandNameInput.placeholder = 'Band name...';
-
-  const createBand = document.createElement('input');
-  createBand.type = 'button';
-  createBand.value = 'Create Band!';
-
-  createBand.onclick = async () => {
-    const r = await fetch(`${serverUrl}/band`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        name: bandNameInput.value
-      }),
-      credentials: 'include',
-      mode: 'cors'
-    })
-  };
-
-  bandsDiv.appendChild(bandNameInput);
-  bandsDiv.appendChild(createBand);
-
-  return from([bandsDiv]);
-}
-
-function renderBand(): Observable<HTMLElement> {
-  return tracks.getTracks(band.bid) //from(tracks.setBand(band.bid, () => {}))
-    .pipe(concatMap(trackList => {
-      // renderTopBar();
-
-      const header = document.createElement('h1');
-      header.innerText = band.name;
-      
-      const recordingsUl = document.createElement('ul');
-
-      for(const { info, state } of trackList) {
+      for(let [bid, bn] of user.bands.entries()) {
         const li = document.createElement('li');
-        li.innerHTML = info.tid;
 
-        if(isPlayable(state)) {
-          const b = document.createElement('input');
-          b.type = 'button';
-          b.value = 'Play';
-          b.onclick = async () => {
-            await state.play(audio ??= new AudioContext());
-          };
+        const a = document.createElement('a');
+        a.href = '#';
+        a.onclick = async () => {
+          band = {
+            bid,
+            name: bn
+          }
+          page$.next('band');
+        };
+        a.innerText = bn;
+        li.appendChild(a);
 
-          li.appendChild(b);
-        }
-        else {
-          const b = document.createElement('input');
-          b.type = 'button';
-          b.value = 'Stop';
-          b.onclick = () => state.stop();
-
-          li.appendChild(b);
-        }
-
-        recordingsUl.appendChild(li);
+        ul.appendChild(li);
       }
 
-      const button = document.createElement('input');
-      button.type = 'button';
-      button.value = 'Record';
+      bandsDiv.appendChild(ul);
 
-      button.onclick = async () => {
-        const track = await Track.record(band.bid, store, jobs);
-        // track.onchange = () => page$.next();
-        tracks.add(track); //this should cause further tracks to appear
+      const bandNameInput = document.createElement('input');
+      bandNameInput.type = 'text';
+      bandNameInput.placeholder = 'Band name...';
 
-        // await render();
+      const createBand = document.createElement('input');
+      createBand.type = 'button';
+      createBand.value = 'Create Band!';
+
+      createBand.onclick = async () => {
+        const r = await fetch(`${serverUrl}/band`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: bandNameInput.value
+          }),
+          credentials: 'include',
+          mode: 'cors'
+        })
       };
 
-      const div = document.createElement('div');
-      div.appendChild(header);
-      div.appendChild(recordingsUl);
-      div.appendChild(button);
-      return [div];
-    }));
-
+      bandsDiv.appendChild(bandNameInput);
+      bandsDiv.appendChild(createBand);
+      return bandsDiv;
+    })())
+  ]).pipe(map(([l,r]) => ({ topDiv: l, mainDiv: r })));
 }
 
+function renderBand(): Observable<Slice> {
+  return combineLatest([
+    renderTopBar(),
 
+    tracks.getTracks(band.bid).pipe(
+      takeUntil(newPage$),
 
+      concatMap(trackList => {
+        const header = document.createElement('h1');
+        header.innerText = band.name;
 
-    
-// async function render(nextPage?: typeof page): Promise<void> {
-//   if(nextPage) { page = nextPage }
-  
-//   const divTop = document.getElementById('topBar')!;
-//   const divMain = document.getElementById('main')!;
+        const recordingsUl = document.createElement('ul');
 
-//   divTop.innerHTML = '';
-//   divMain.innerHTML = '';
-  
-//   switch(page) {
-//     case 'login':
-//       const googleToken = await getGoogleToken();
+        for(const { info, state } of trackList) {
+          const li = document.createElement('li');
+          li.innerHTML = info.tid;
 
-//       session = await createSession('google', googleToken);
-//       saveSession(session);
+          if(isPlayable(state)) {
+            const b = document.createElement('input');
+            b.type = 'button';
+            b.value = 'Play';
+            b.onclick = async () => {
+              await state.play(audio ??= new AudioContext());
+            };
 
-//       return await render('resume');
+            li.appendChild(b);
+          }
+          else {
+            const b = document.createElement('input');
+            b.type = 'button';
+            b.value = 'Stop';
+            b.onclick = () => state.stop();
 
-// 		case 'logout':
-// 			clearSession();
-// 			//todo close store and job queue here
-// 			return await render('login');
+            li.appendChild(b);
+          }
 
-//     case 'resume':
-//       const summoned = trySummonSession();
-//       if(!summoned) {
-//         return await render('login');
-//       }
+          recordingsUl.appendChild(li);
+        }
 
-//       session = summoned;
-// 			const uid = session.uid;
+        const button = document.createElement('input');
+        button.type = 'button';
+        button.value = 'Record';
 
-// 			store = await openStore(uid);
-// 			jobs = await runJobQueue(uid, job => {
-// 				console.log('Handling job', job);
+        button.onclick = async () => {
+          const track = await Track.record(band.bid, store, jobs);
+          tracks.add(track);
+        };
 
-// 				//todo some kind of branching on job type
-// 				return Track.createJobHandler({ store, jobs })(job);
-// 			})
+        const div = document.createElement('div');
+        div.appendChild(header);
+        div.appendChild(recordingsUl);
+        div.appendChild(button);
+        return [div];
+      })
+    )
+  ]).pipe(map(([l,r]) => ({ topDiv: l, mainDiv: r })));
+}
 
-//       tracks = new TrackRepo(store, jobs);
+function renderTopBar(): Observable<HTMLElement> {
+  return interval(1000).pipe(
+    startWith(0),
 
-//       const dynamo = new DynamoDBClient({
-//         region: 'eu-west-1',
-//         credentials: session.awsCreds
-//       });
+    concatMap(_ => {
+      const nameSpan = document.createElement('span');
+      nameSpan.innerText = session.uid;
+      nameSpan.onclick = () => page$.next('user');
 
-//       const loaded = await loadUser(dynamo, uid);
-//       if(!loaded) {
-//         return await render('logout');
-//       }
+      const logoutButton = document.createElement('input');
+      logoutButton.type = 'button';
+      logoutButton.value = 'Log out';
+      logoutButton.onclick = () => page$.next('logout');
 
-//       user = loaded;
-//       return await render('user');
+      const timeSpan = document.createElement('span');
+      setInterval(() => timeSpan.innerHTML = Date.now().toString(), 1000);
 
-//     case 'user':
-//       renderTopBar();
-      
-//       const bandsDiv = document.createElement('div');
-//       bandsDiv.childNodes.forEach(n => n.remove());
-
-//       const ul = document.createElement('ul');
-
-//       for(let [bid, bn] of user.bands.entries()) {
-//         const li = document.createElement('li');
-
-//         const a = document.createElement('a');
-//         a.href = '#';
-//         a.onclick = async () => {
-//           band = {
-//             bid,
-//             name: bn
-//           }
-//           await render('band');
-//         };
-//         a.innerText = bn;
-//         li.appendChild(a);
-
-//         ul.appendChild(li);
-//       };
-
-//       bandsDiv.appendChild(ul);
-
-//       const bandNameInput = document.createElement('input');
-//       bandNameInput.type = 'text';
-//       bandNameInput.placeholder = 'Band name...';
-
-//       const createBand = document.createElement('input');
-//       createBand.type = 'button';
-//       createBand.value = 'Create Band!';
-
-//       createBand.onclick = async () => {
-
-//         const r = await fetch(`${serverUrl}/band`, {
-//           method: 'POST',
-//           headers: {
-//             'Content-Type': 'application/json'
-//           },
-//           body: JSON.stringify({
-//             name: bandNameInput.value
-//           }),
-//           credentials: 'include',
-//           mode: 'cors'
-//         })
-//       };
-
-//       bandsDiv.appendChild(bandNameInput);
-//       bandsDiv.appendChild(createBand);
-
-//       divMain.appendChild(bandsDiv);
-//       break;
-
-//     case 'band':
-
-//       // tracks.getTracks(band.bid).forEach(r => render());
-
-//       // overall system should have one subscription at bottom
-//       // receiving pages and their versions
-      
-//       await tracks.setBand(band.bid, () => render());
-
-//       renderTopBar();
-
-//       const header = document.createElement('h1');
-//       header.innerText = band.name;
-      
-//       const recordingsUl = document.createElement('ul');
-
-//       for(const { info, state } of tracks.list()) {
-//         const li = document.createElement('li');
-//         li.innerHTML = info.tid;
-
-//         if(isPlayable(state)) {
-//           const b = document.createElement('input');
-//           b.type = 'button';
-//           b.value = 'Play';
-//           b.onclick = async () => {
-//             await state.play(audio ??= new AudioContext());
-//           };
-
-//           li.appendChild(b);
-//         }
-//         else {
-//           const b = document.createElement('input');
-//           b.type = 'button';
-//           b.value = 'Stop';
-//           b.onclick = () => state.stop();
-
-//           li.appendChild(b);
-//         }
-
-//         recordingsUl.appendChild(li);
-//       }
-
-//       const button = document.createElement('input');
-//       button.type = 'button';
-//       button.value = 'Record';
-
-//       button.onclick = async () => {
-//         const track = await Track.record(band.bid, store, jobs);
-//         track.onchange = () => render();
-//         tracks.add(track);
-
-//         await render();
-//       };
-
-//       divMain.appendChild(header);
-//       divMain.appendChild(recordingsUl);
-//       divMain.appendChild(button);
-
-//       break;
-//   }
-
-//   function renderTopBar() {
-//     const nameSpan = document.createElement('span');
-//     nameSpan.innerText = session.uid;
-
-//     const logoutButton = document.createElement('input');
-//     logoutButton.type = 'button';
-//     logoutButton.value = 'Log out';
-//     logoutButton.onclick = () => render('logout');
-
-//     const timeSpan = document.createElement('span');
-//     setInterval(() => timeSpan.innerHTML = Date.now().toString(), 1000);
-
-//     divTop.appendChild(nameSpan);
-//     divTop.appendChild(logoutButton);
-//     divTop.appendChild(timeSpan);
-//   }
-// }
+      const div = document.createElement('div');
+      div.appendChild(nameSpan);
+      div.appendChild(logoutButton);
+      div.appendChild(timeSpan);
+      return [div];
+    })
+  )
+}
 
 function trySummonSession(): Session|false {
   const found = window.localStorage.getItem('upis_session');
