@@ -138,7 +138,7 @@ async function render(nextPage?: typeof page): Promise<void> {
       break;
 
     case 'band':
-      tracks.setBand(band.bid, () => render());
+      await tracks.setBand(band.bid, () => render());
 
       renderTopBar();
 

@@ -1,5 +1,6 @@
 import { openDB } from "idb";
 import { PersistableTrack, isPersistedTrack } from "./record";
+import { Observable, concatMap, from } from "rxjs";
 
 export type StreamId = string;
 export type StreamBlob = { cursor: StreamCursor, blob: Blob }
@@ -9,11 +10,12 @@ export type BlobId = StreamCursor;
 type BlobSaver = (id: BlobId, blob: Blob) => Promise<BlobId>;
 
 export type Store = {
-  saveBlob: BlobSaver
-  readBlobs(cursor: StreamCursor): Promise<StreamBlob[]>
   saveTrack(track: PersistableTrack): Promise<void>
   loadTrack(bid: string, tid: string): Promise<PersistableTrack|false>
   loadTracks(bid: string): Promise<PersistableTrack[]>
+
+  saveBlob: BlobSaver
+  loadBlobs(cursor: StreamCursor): Observable<StreamBlob>
 };
 
 export async function openStore(name: string): Promise<Store> {
@@ -41,20 +43,6 @@ export async function openStore(name: string): Promise<Store> {
       await db.put('blobs', { stream: id.stream, idx: id.idx, blob });
       console.log('saved blob', id);
       return id;
-    },
-
-    async readBlobs(cursor: StreamCursor): Promise<StreamBlob[]> {
-      const found = await db.getAll('blobs', IDBKeyRange.lowerBound([cursor.stream, cursor.idx]), 1); //todo read more than one!
-
-      return found.flatMap(v => {
-        return <StreamBlob>{ //todo proper typing here
-          blob: v.blob as Blob,
-          cursor: {
-            stream: v.stream as string,
-            idx: v.idx as number
-          }
-        }
-      });
     },
 
     async saveTrack(track: PersistableTrack): Promise<void> {
@@ -87,6 +75,24 @@ export async function openStore(name: string): Promise<Store> {
       console.info('Loaded tracks from IDB for band', bid, tracks);
 
       return tracks;
+    },
+
+    loadBlobs(cursor: StreamCursor): Observable<StreamBlob> {
+      return from(db.getAll('blobs', IDBKeyRange.bound([cursor.stream], [cursor.stream, 9999999])))
+        .pipe(
+          concatMap(rows => rows),
+          concatMap(row => {
+            return [<StreamBlob>{ //todo proper typing here
+              blob: row.blob as Blob,
+              cursor: {
+                stream: row.stream as string,
+                idx: row.idx as number
+              }
+            }];
+          })
+        );
+
+      //todo load blobs in blocks, streaming results gradually
     }
   };
 }

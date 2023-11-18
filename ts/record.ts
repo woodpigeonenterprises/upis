@@ -1,3 +1,4 @@
+import { Observable, ReplaySubject, first, firstValueFrom, from, take, toArray } from "rxjs";
 import { JobQueue } from "./queue";
 import { Store, StreamCursor } from "./store"
 import { timeOrderedId } from "./util";
@@ -67,7 +68,7 @@ export class Recording {
             lastIdx
           });
 
-          this.track.sink(new Playable(this.track, blob));
+          this.track.sink(new Playable(this.track, () => from([blob])));
         });
       };
 
@@ -82,16 +83,23 @@ export class Recording {
 
 export class Playable {
   readonly track: TrackContext
-  readonly blob: Blob
+  readonly blob$: ReplaySubject<Blob> = new ReplaySubject();
   
-  constructor(track: TrackContext, blob: Blob) {
+  constructor(track: TrackContext, getBlob$: ()=>Observable<Blob>) {
     this.track = track;
-    this.blob = blob;
+    const subscribed = getBlob$().subscribe(this.blob$);
+
+    //todo
+    //- should lazily call getBlob$
+    //- need to release subscription via some kind of disposable mechanism
   }
 
   async play(x: AudioContext): Promise<void> {
     const source = x.createBufferSource();
-    source.buffer = await x.decodeAudioData(await this.blob.arrayBuffer());;
+
+    const blob = await firstValueFrom(this.blob$);
+    
+    source.buffer = await x.decodeAudioData(await blob.arrayBuffer());;
 
     source.connect(x.destination);
     source.start();
@@ -218,7 +226,8 @@ export class Track implements PersistableTrack
                 track.persistState = { type: 'uploaded' };
               }
               else {
-                const found = await x.store.readBlobs(track.persistState.cursor);
+                //todo upload in a more gradual way than the below
+                const found = await firstValueFrom(x.store.loadBlobs(track.persistState.cursor).pipe(take(1), toArray()));
                 if(!found.length) return true;
 
                 const { blob, cursor } = found[0]; //todo save all together, poss via clumping
@@ -335,7 +344,7 @@ export class Track implements PersistableTrack
 
     const [state, persistState] = stateFac(context);
 
-    return new Track(info, state, persistState);
+    return track = new Track(info, state, persistState);
   }
 
   static async record(bid: string, store: Store, jobs: JobQueue): Promise<Track> {

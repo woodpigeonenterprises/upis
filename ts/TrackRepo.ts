@@ -1,3 +1,4 @@
+import { from, map } from "rxjs";
 import { JobQueue } from "./queue";
 import { Playable, Track } from "./record";
 import { Store } from "./store";
@@ -22,15 +23,18 @@ export default class TrackRepo {
 
     this.bid = bid;
 
-    const persisted = await this.store.loadTracks(bid);
+    const allLoaded = await this.store.loadTracks(bid);
 
-    this.tracks = persisted
+    this.tracks = allLoaded
       .map(p => Track.init(
         p.info,
         this.store,
         this.jobs,
-        x => [new Playable(x, new Blob()), p.persistState])
-      );
+        x => [
+          new Playable(x, () => this.store.loadBlobs({ stream: p.info.tid, idx: 0 }).pipe(map(sb => sb.blob))),
+          p.persistState
+        ]
+      ));
   }
 
   unsetBand() {
