@@ -1,21 +1,36 @@
-import { Track } from "./record";
+import { JobQueue } from "./queue";
+import { Playable, Track } from "./record";
 import { Store } from "./store";
+
+// somehow we should be asking the store for tracks with regularity
+//
+//
 
 export default class TrackRepo {
   private bid: string|undefined = undefined;
   private store: Store;
+  private jobs: JobQueue;
   private tracks: Track[] = [];
 
-  constructor(store:Store) {
+  constructor(store:Store, jobs: JobQueue) {
     this.store = store;
+    this.jobs = jobs;
   }
 
-  setBand(bid: string, sink:()=>void) {
+  async setBand(bid: string, sink:()=>void): Promise<void> {
     if(bid == this.bid) return;
 
     this.bid = bid;
-    this.tracks = [];
-    //start populating here!
+
+    const persisted = await this.store.loadTracks(bid);
+
+    this.tracks = persisted
+      .map(p => Track.init(
+        p.info,
+        this.store,
+        this.jobs,
+        x => [new Playable(x, new Blob()), p.persistState])
+      );
   }
 
   unsetBand() {

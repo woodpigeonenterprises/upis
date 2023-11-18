@@ -65,7 +65,7 @@ async function render(nextPage?: typeof page): Promise<void> {
 				return Track.createJobHandler({ store, jobs })(job);
 			})
 
-      tracks = new TrackRepo(store);
+      tracks = new TrackRepo(store, jobs);
 
       const dynamo = new DynamoDBClient({
         region: 'eu-west-1',

@@ -13,6 +13,7 @@ export type Store = {
   readBlobs(cursor: StreamCursor): Promise<StreamBlob[]>
   saveTrack(track: PersistableTrack): Promise<void>
   loadTrack(bid: string, tid: string): Promise<PersistableTrack|false>
+  loadTracks(bid: string): Promise<PersistableTrack[]>
 };
 
 export async function openStore(name: string): Promise<Store> {
@@ -77,6 +78,15 @@ export async function openStore(name: string): Promise<Store> {
 
       console.error('Bad track loaded', track)
       return false;
+    },
+
+    async loadTracks(bid: string): Promise<PersistableTrack[]> {
+      const rows = await db.getAll('tracks', IDBKeyRange.bound([bid], [bid, 'ZZZZZZ']));
+      const tracks = rows.flatMap(r => isPersistedTrack(r) ? [r] : []);
+
+      console.info('Loaded tracks from IDB for band', bid, tracks);
+
+      return tracks;
     }
   };
 }
